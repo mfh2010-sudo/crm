@@ -12,7 +12,7 @@
 5. روح **Settings → API** وانسخ:
    - `Project URL` → هيبقى شكله: `https://xxxx.supabase.co`
    - `anon public key` → المفتاح الطويل
-
+1
 ---
 
 ## الخطوة 2 — رفع المشروع على GitHub
