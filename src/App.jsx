@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { supabase } from "./supabase.js";
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -12,18 +12,19 @@ const STAGES = [
   { id: "closing",       label: "Closing",       color: "#3B6D11", bg: "#EAF3DE", text: "#173404" },
 ];
 
-const DEFAULT_MSGS = [
-  { title: "رسالة ترحيب",    tag: "Lead",     body: "السلام عليكم {اسم}،\nأهلاً وسهلاً بك! أنا من HeroTec.\nسعيد بتواصلك معانا 🙏\nمتى يناسبك نتكلم شوية؟" },
-  { title: "متابعة بعد Demo",tag: "Demo",     body: "مرحباً {اسم}،\nإزيك؟ عاوز أتأكد إنك استفدت من العرض.\nعندك أي أسئلة؟ أنا موجود 💪" },
-  { title: "إرسال Proposal", tag: "Proposal", body: "أستاذ {اسم}،\nبرفق ليك العرض المالي كما اتفقنا.\nأي تعديل إحنا في الخدمة 📄" },
-  { title: "Closing مبروك",  tag: "Closing",  body: "مبروك {اسم}! 🎉\nيسعدنا إننا نكون شركاء نجاحك.\nهنبدأ على طول، متى يناسبك؟" },
-];
-
 function stageInfo(id) { return STAGES.find(s => s.id === id) || STAGES[0]; }
 
-function sendWA(phone, body, name) {
-  const text = body.replace(/{اسم}/g, name || "");
-  const clean = phone.replace(/[^\d+]/g, "");
+// بناء نص الرسالة مع سطر التحية
+function buildMessage(body, lead) {
+  const nick = (lead?.nickname || "").trim();
+  const greeting = nick ? `مرحبا ${nick}` : "مرحبا";
+  const cleaned = (body || "").replace(/{اسم}/g, nick);
+  return `${greeting}\n\n${cleaned}`;
+}
+
+function sendWA(phone, body, lead) {
+  const text = buildMessage(body, lead);
+  const clean = (phone || "").replace(/[^\d+]/g, "");
   const num = clean.startsWith("0") ? "2" + clean.substring(1) : clean;
   window.open(`https://wa.me/${num}?text=${encodeURIComponent(text)}`, "_blank");
 }
@@ -64,7 +65,7 @@ function Modal({ title, onClose, children, wide }) {
   return (
     <div onClick={e => e.target === e.currentTarget && onClose()}
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: "1.5rem", width: "100%", maxWidth: wide ? 640 : 480, maxHeight: "92vh", overflowY: "auto", direction: "rtl" }}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: "1.5rem", width: "100%", maxWidth: wide ? 640 : 500, maxHeight: "92vh", overflowY: "auto", direction: "rtl" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
           <h3 style={{ fontSize: 16, fontWeight: 700, color: "#1a1a1a" }}>{title}</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#aaa", lineHeight: 1 }}>×</button>
@@ -75,38 +76,127 @@ function Modal({ title, onClose, children, wide }) {
   );
 }
 
-function Field({ label, children }) {
+function Field({ label, required, children }) {
   return (
     <div style={{ marginBottom: 12 }}>
-      <label style={{ display: "block", fontSize: 12, color: "#555", fontWeight: 600, marginBottom: 4 }}>{label}</label>
+      <label style={{ display: "block", fontSize: 12, color: "#555", fontWeight: 600, marginBottom: 4 }}>
+        {label} {required && <span style={{ color: "#c00" }}>*</span>}
+      </label>
       {children}
     </div>
   );
 }
 
+// ── Multi-select for interests ─────────────────────────────────────
+function InterestPicker({ interests, selected, onChange, onManage }) {
+  return (
+    <div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+        {interests.length === 0 && (
+          <span style={{ fontSize: 12, color: "#aaa" }}>لا توجد مجالات — أضف من الرابط تحت</span>
+        )}
+        {interests.map(it => {
+          const on = selected.includes(it.id);
+          return (
+            <button key={it.id} type="button"
+              onClick={() => onChange(on ? selected.filter(x => x !== it.id) : [...selected, it.id])}
+              style={{
+                fontSize: 12, padding: "5px 12px", borderRadius: 16, cursor: "pointer",
+                border: on ? "1.5px solid #4F5BD5" : "1px solid #ddd",
+                background: on ? "#EEEDFE" : "#fafafa",
+                color: on ? "#3C3489" : "#666",
+                fontWeight: on ? 700 : 500,
+              }}>
+              {on && "✓ "}{it.name}
+            </button>
+          );
+        })}
+      </div>
+      <button type="button" onClick={onManage}
+        style={{ fontSize: 11, color: "#4F5BD5", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0 }}>
+        + إدارة مجالات الاهتمام
+      </button>
+    </div>
+  );
+}
+
+// ── Manage lookup table (interests / projects) ─────────────────────
+function ManageListModal({ title, items, onAdd, onDelete, onClose, saving }) {
+  const [newName, setNewName] = useState("");
+  function submit() {
+    const v = newName.trim();
+    if (!v) return;
+    onAdd(v);
+    setNewName("");
+  }
+  return (
+    <Modal title={title} onClose={onClose}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+        <input style={{ ...S.inputBase, flex: 1 }} value={newName} onChange={e => setNewName(e.target.value)}
+          placeholder="اسم جديد..." onKeyDown={e => { if (e.key === "Enter") submit(); }} />
+        <button style={S.btnPrimary} disabled={saving || !newName.trim()} onClick={submit}>إضافة</button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 320, overflowY: "auto" }}>
+        {items.length === 0 && <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "1rem" }}>القائمة فاضية</div>}
+        {items.map(it => (
+          <div key={it.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fafafa", border: "1px solid #eee", borderRadius: 8, padding: "8px 12px" }}>
+            <span style={{ fontSize: 13, color: "#1a1a1a" }}>{it.name}</span>
+            <button style={{ ...S.btnSecondary, padding: "3px 10px", fontSize: 12, color: "#c00" }}
+              onClick={() => { if (confirm(`حذف "${it.name}"؟`)) onDelete(it.id); }}>حذف</button>
+          </div>
+        ))}
+      </div>
+      <div style={{ marginTop: 14, textAlign: "left" }}>
+        <button style={S.btnSecondary} onClick={onClose}>إغلاق</button>
+      </div>
+    </Modal>
+  );
+}
+
 // ── Lead Modal (Add / Edit) ────────────────────────────────────────
-function LeadModal({ lead, messages, onSave, onClose, loading }) {
+function LeadModal({ lead, messages, projects, interests, onSave, onClose, loading, onManageInterests }) {
   const isEdit = !!lead?.id;
   const [form, setForm] = useState({
-    name: lead?.name || "", phone: lead?.phone || "", job: lead?.job || "",
-    stage: lead?.stage || "lead", comment: lead?.comment || "", alert_text: lead?.alert_text || "",
+    nickname: lead?.nickname || "",
+    phone: lead?.phone || "",
+    name: lead?.name || "",
+    job: lead?.job || "",
+    stage: lead?.stage || "lead",
+    comment: lead?.comment || "",
+    alert_text: lead?.alert_text || "",
+    interests: lead?.interests || [],
   });
   const [selectedMsg, setSelectedMsg] = useState(() => !isEdit ? (messages.find(m => m.tag === "Lead") || messages[0] || null) : null);
   const [showPicker, setShowPicker] = useState(!isEdit);
+  const [projFilter, setProjFilter] = useState("");
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
   function handleSave() {
-    if (!form.name.trim() || !form.phone.trim()) { alert("الاسم والهاتف مطلوبين"); return; }
+    if (!form.nickname.trim() || !form.phone.trim()) { alert("اسم الشهرة ورقم الموبايل مطلوبين"); return; }
     onSave(form, selectedMsg);
   }
 
-  const preview = selectedMsg ? selectedMsg.body.replace(/{اسم}/g, form.name || "العميل") : "";
+  const filteredMsgs = projFilter ? messages.filter(m => String(m.project_id) === projFilter) : messages;
+  const preview = selectedMsg ? buildMessage(selectedMsg.body, form) : "";
 
   return (
     <Modal title={isEdit ? "تعديل العميل" : "إضافة Lead جديد"} onClose={onClose}>
-      <Field label="الاسم"><input style={S.inputBase} value={form.name} onChange={set("name")} placeholder="اسم العميل" /></Field>
-      <Field label="رقم الهاتف"><input style={S.inputBase} value={form.phone} onChange={set("phone")} placeholder="01x xxxx xxxx" /></Field>
-      <Field label="الوظيفة"><input style={S.inputBase} value={form.job} onChange={set("job")} placeholder="مثال: مدير مبيعات" /></Field>
+      <Field label="اسم الشهرة" required>
+        <input style={S.inputBase} value={form.nickname} onChange={set("nickname")} placeholder="مثال: أ. محمد / د. سارة" />
+      </Field>
+      <Field label="رقم الموبايل" required>
+        <input style={S.inputBase} value={form.phone} onChange={set("phone")} placeholder="01x xxxx xxxx" />
+      </Field>
+      <Field label="الاسم الكامل">
+        <input style={S.inputBase} value={form.name} onChange={set("name")} placeholder="اختياري" />
+      </Field>
+      <Field label="الوظيفة">
+        <input style={S.inputBase} value={form.job} onChange={set("job")} placeholder="اختياري" />
+      </Field>
+      <Field label="مجالات الاهتمام">
+        <InterestPicker interests={interests} selected={form.interests}
+          onChange={v => setForm(f => ({ ...f, interests: v }))} onManage={onManageInterests} />
+      </Field>
       {isEdit && (
         <Field label="المرحلة">
           <select style={S.inputBase} value={form.stage} onChange={set("stage")}>
@@ -115,15 +205,14 @@ function LeadModal({ lead, messages, onSave, onClose, loading }) {
         </Field>
       )}
       <Field label="تعليق">
-        <textarea style={{ ...S.inputBase, height: 70, resize: "vertical" }} value={form.comment} onChange={set("comment")} placeholder="ملاحظة..." />
+        <textarea style={{ ...S.inputBase, height: 65, resize: "vertical" }} value={form.comment} onChange={set("comment")} placeholder="اختياري" />
       </Field>
-      <Field label="تنبيه (اختياري)">
-        <input style={S.inputBase} value={form.alert_text} onChange={set("alert_text")} placeholder="مثال: متابعة بكرة الساعة 10" />
+      <Field label="تنبيه">
+        <input style={S.inputBase} value={form.alert_text} onChange={set("alert_text")} placeholder="اختياري" />
       </Field>
 
-      {/* ── Message Picker (new leads only) ── */}
       {!isEdit && (
-        <div style={{ marginTop: 4 }}>
+        <div style={{ marginTop: 4, borderTop: "1px solid #eee", paddingTop: 12 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
             <span style={{ fontSize: 12, color: "#444", fontWeight: 700 }}>رسالة واتساب عند الحفظ</span>
             <button style={{ fontSize: 11, color: "#4F5BD5", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
@@ -133,28 +222,41 @@ function LeadModal({ lead, messages, onSave, onClose, loading }) {
           </div>
 
           {showPicker && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 10, maxHeight: 210, overflowY: "auto" }}>
-              {messages.map(m => {
-                const sel = selectedMsg?.id === m.id;
-                return (
-                  <div key={m.id} onClick={() => { setSelectedMsg(m); setShowPicker(false); }}
-                    style={{ border: sel ? "2px solid #4F5BD5" : "1px solid #e0e0e0", borderRadius: 10, padding: "9px 12px", cursor: "pointer", background: sel ? "#f0f1ff" : "#fafafa" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 3 }}>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: sel ? "#4F5BD5" : "#1a1a1a" }}>{m.title}</span>
-                      <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 8, background: "#E6F1FB", color: "#185FA5", fontWeight: 600 }}>{m.tag}</span>
+            <>
+              {projects.length > 0 && (
+                <select style={{ ...S.inputBase, marginBottom: 8 }} value={projFilter} onChange={e => setProjFilter(e.target.value)}>
+                  <option value="">كل المشروعات</option>
+                  {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+                </select>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 10, maxHeight: 210, overflowY: "auto" }}>
+                {filteredMsgs.length === 0 && <div style={{ fontSize: 12, color: "#aaa", textAlign: "center", padding: 10 }}>لا توجد رسائل</div>}
+                {filteredMsgs.map(m => {
+                  const sel = selectedMsg?.id === m.id;
+                  const proj = projects.find(p => p.id === m.project_id);
+                  return (
+                    <div key={m.id} onClick={() => { setSelectedMsg(m); setShowPicker(false); }}
+                      style={{ border: sel ? "2px solid #4F5BD5" : "1px solid #e0e0e0", borderRadius: 10, padding: "9px 12px", cursor: "pointer", background: sel ? "#f0f1ff" : "#fafafa" }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 3, gap: 6 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: sel ? "#4F5BD5" : "#1a1a1a" }}>{m.title}</span>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          {proj && <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 8, background: "#FAEEDA", color: "#633806", fontWeight: 600 }}>{proj.name}</span>}
+                          <span style={{ fontSize: 10, padding: "2px 7px", borderRadius: 8, background: "#E6F1FB", color: "#185FA5", fontWeight: 600 }}>{m.tag}</span>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#777", lineHeight: 1.5 }}>
+                        {m.body.substring(0, 80)}{m.body.length > 80 ? "…" : ""}
+                      </div>
+                      {sel && <div style={{ marginTop: 4, fontSize: 11, color: "#4F5BD5", fontWeight: 700 }}>✓ محددة</div>}
                     </div>
-                    <div style={{ fontSize: 11, color: "#777", lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
-                      {m.body.replace(/{اسم}/g, form.name || "العميل").substring(0, 90)}{m.body.length > 90 ? "…" : ""}
-                    </div>
-                    {sel && <div style={{ marginTop: 4, fontSize: 11, color: "#4F5BD5", fontWeight: 700 }}>✓ محددة</div>}
-                  </div>
-                );
-              })}
-              <div onClick={() => { setSelectedMsg(null); setShowPicker(false); }}
-                style={{ border: !selectedMsg ? "2px solid #aaa" : "1px solid #e0e0e0", borderRadius: 10, padding: "9px 12px", cursor: "pointer", background: "#fafafa", fontSize: 12, color: "#888", textAlign: "center" }}>
-                بدون رسالة واتساب
+                  );
+                })}
+                <div onClick={() => { setSelectedMsg(null); setShowPicker(false); }}
+                  style={{ border: !selectedMsg ? "2px solid #aaa" : "1px solid #e0e0e0", borderRadius: 10, padding: "9px 12px", cursor: "pointer", background: "#fafafa", fontSize: 12, color: "#888", textAlign: "center" }}>
+                  بدون رسالة واتساب
+                </div>
               </div>
-            </div>
+            </>
           )}
 
           {selectedMsg && !showPicker && (
@@ -166,20 +268,13 @@ function LeadModal({ lead, messages, onSave, onClose, loading }) {
               <div style={{ fontSize: 12, color: "#1a4a2a", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{preview}</div>
             </div>
           )}
-
-          {!selectedMsg && !showPicker && (
-            <div style={{ background: "#fff8e1", border: "1px solid #ffe082", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#7a5c00", marginBottom: 10 }}>
-              ⚠️ لن يُرسل واتساب —
-              <button style={{ fontSize: 12, color: "#4F5BD5", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", marginRight: 4 }} onClick={() => setShowPicker(true)}>اختر رسالة</button>
-            </div>
-          )}
         </div>
       )}
 
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
         <button style={S.btnSecondary} onClick={onClose}>إلغاء</button>
         <button style={{ ...S.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={handleSave} disabled={loading}>
-          {loading ? "جاري الحفظ..." : isEdit ? "حفظ التعديلات" : selectedMsg ? "حفظ وإرسال WhatsApp" : "حفظ بدون WhatsApp"}
+          {loading ? "جاري الحفظ..." : isEdit ? "حفظ التعديلات" : selectedMsg ? "حفظ وإرسال WhatsApp" : "حفظ"}
         </button>
       </div>
     </Modal>
@@ -187,20 +282,34 @@ function LeadModal({ lead, messages, onSave, onClose, loading }) {
 }
 
 // ── Send WA Modal ──────────────────────────────────────────────────
-function SendWAModal({ lead, messages, onClose }) {
+function SendWAModal({ lead, messages, projects, onClose }) {
+  const [projFilter, setProjFilter] = useState("");
+  const filtered = projFilter ? messages.filter(m => String(m.project_id) === projFilter) : messages;
   return (
-    <Modal title={`إرسال لـ ${lead.name}`} onClose={onClose}>
-      <p style={{ fontSize: 12, color: "#888", marginBottom: 12 }}>اختر رسالة من المكتبة:</p>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 380, overflowY: "auto" }}>
-        {messages.map(m => (
-          <div key={m.id} style={{ background: "#f8f9fa", border: "1px solid #eee", borderRadius: 10, padding: "10px 12px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a", marginBottom: 2 }}>{m.title}</div>
-              <div style={{ fontSize: 11, color: "#777", lineHeight: 1.5 }}>{m.body.replace(/{اسم}/g, lead.name).substring(0, 80)}…</div>
+    <Modal title={`إرسال لـ ${lead.nickname || lead.name || lead.phone}`} onClose={onClose}>
+      {projects.length > 0 && (
+        <select style={{ ...S.inputBase, marginBottom: 10 }} value={projFilter} onChange={e => setProjFilter(e.target.value)}>
+          <option value="">كل المشروعات</option>
+          {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+        </select>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 360, overflowY: "auto" }}>
+        {filtered.length === 0 && <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "1rem" }}>لا توجد رسائل</div>}
+        {filtered.map(m => {
+          const proj = projects.find(p => p.id === m.project_id);
+          return (
+            <div key={m.id} style={{ background: "#f8f9fa", border: "1px solid #eee", borderRadius: 10, padding: "10px 12px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a" }}>{m.title}</span>
+                  {proj && <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 8, background: "#FAEEDA", color: "#633806", fontWeight: 600 }}>{proj.name}</span>}
+                </div>
+                <div style={{ fontSize: 11, color: "#777", lineHeight: 1.5 }}>{m.body.substring(0, 70)}…</div>
+              </div>
+              <button style={S.btnWA} onClick={() => { sendWA(lead.phone, m.body, lead); onClose(); }}>إرسال</button>
             </div>
-            <button style={S.btnWA} onClick={() => { sendWA(lead.phone, m.body, lead.name); onClose(); }}>إرسال</button>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div style={{ marginTop: 12, textAlign: "left" }}>
         <button style={S.btnSecondary} onClick={onClose}>إغلاق</button>
@@ -210,27 +319,48 @@ function SendWAModal({ lead, messages, onClose }) {
 }
 
 // ── Message Modal ──────────────────────────────────────────────────
-function MsgModal({ msg, onSave, onClose, loading }) {
-  const [form, setForm] = useState({ title: msg?.title || "", tag: msg?.tag || "Lead", body: msg?.body || "" });
+function MsgModal({ msg, projects, onSave, onClose, loading, onManageProjects }) {
+  const [form, setForm] = useState({
+    title: msg?.title || "",
+    tag: msg?.tag || "Lead",
+    body: msg?.body || "",
+    project_id: msg?.project_id ? String(msg.project_id) : "",
+  });
   const [preview, setPreview] = useState("");
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
 
   return (
     <Modal title={msg?.id ? "تعديل الرسالة" : "رسالة جديدة"} onClose={onClose}>
-      <Field label="عنوان الرسالة"><input style={S.inputBase} value={form.title} onChange={set("title")} placeholder="مثال: رسالة ترحيب" /></Field>
+      <Field label="عنوان الرسالة" required>
+        <input style={S.inputBase} value={form.title} onChange={set("title")} placeholder="مثال: رسالة ترحيب" />
+      </Field>
+      <Field label="المشروع">
+        <select style={S.inputBase} value={form.project_id} onChange={set("project_id")}>
+          <option value="">بدون مشروع</option>
+          {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+        </select>
+        <button type="button" onClick={onManageProjects}
+          style={{ fontSize: 11, color: "#4F5BD5", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0, marginTop: 5 }}>
+          + إدارة المشروعات
+        </button>
+      </Field>
       <Field label="التصنيف">
         <select style={S.inputBase} value={form.tag} onChange={set("tag")}>
           {["Lead","Qualification","Demo","Needs Analysis","Proposal","Negotiation","Closing","عام"].map(t => <option key={t}>{t}</option>)}
         </select>
       </Field>
-      <Field label="نص الرسالة — استخدم {اسم} لاسم العميل">
-        <textarea style={{ ...S.inputBase, height: 110, resize: "vertical" }} value={form.body} onChange={set("body")} placeholder="مرحباً {اسم}، ..." />
+      <Field label="نص الرسالة" required>
+        <textarea style={{ ...S.inputBase, height: 110, resize: "vertical" }} value={form.body} onChange={set("body")}
+          placeholder="اكتب نص الرسالة هنا..." />
+        <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>
+          💡 سطر "مرحبا [اسم الشهرة]" هيتضاف تلقائياً في أول الرسالة
+        </div>
       </Field>
       {preview && (
         <div style={{ background: "#e9fce9", borderRadius: 10, padding: 12, fontSize: 12, color: "#1a3a1a", marginBottom: 10, whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{preview}</div>
       )}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-        <button style={S.btnSecondary} onClick={() => setPreview(form.body.replace(/{اسم}/g, "أحمد"))}>معاينة</button>
+        <button style={S.btnSecondary} onClick={() => setPreview(buildMessage(form.body, { nickname: "أ. محمد" }))}>معاينة</button>
         <button style={S.btnSecondary} onClick={onClose}>إلغاء</button>
         <button style={{ ...S.btnPrimary, opacity: loading ? 0.7 : 1 }} onClick={() => onSave(form)} disabled={loading}>
           {loading ? "جاري الحفظ..." : "حفظ"}
@@ -243,7 +373,7 @@ function MsgModal({ msg, onSave, onClose, loading }) {
 // ── History Modal ──────────────────────────────────────────────────
 function HistoryModal({ lead, history, onClose }) {
   return (
-    <Modal title={`تاريخ ${lead.name}`} onClose={onClose}>
+    <Modal title={`تاريخ ${lead.nickname || lead.name || lead.phone}`} onClose={onClose}>
       {history.length === 0 ? (
         <p style={{ color: "#aaa", fontSize: 13, textAlign: "center", padding: "1rem" }}>لا يوجد تاريخ بعد</p>
       ) : (
@@ -273,7 +403,7 @@ function HistoryModal({ lead, history, onClose }) {
 }
 
 // ── Kanban ─────────────────────────────────────────────────────────
-function KanbanView({ leads, onEdit, onDelete, onWA, onHistory }) {
+function KanbanView({ leads, interests, onEdit, onDelete, onWA, onHistory }) {
   return (
     <div style={{ overflowX: "auto", paddingBottom: 8 }}>
       <div style={{ display: "flex", gap: 10, minWidth: 1000 }}>
@@ -290,15 +420,24 @@ function KanbanView({ leads, onEdit, onDelete, onWA, onHistory }) {
                   style={{ background: "#fff", border: "1px solid #e8e8e8", borderRadius: 9, padding: "8px 9px", marginBottom: 8, cursor: "pointer" }}
                   onMouseEnter={e => e.currentTarget.style.borderColor = s.color}
                   onMouseLeave={e => e.currentTarget.style.borderColor = "#e8e8e8"}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a", marginBottom: 2 }}>{l.name}</div>
-                  {l.job && <div style={{ fontSize: 11, color: "#888", marginBottom: 6 }}>{l.job}</div>}
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a", marginBottom: 2 }}>{l.nickname || l.name || l.phone}</div>
+                  {l.job && <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{l.job}</div>}
+                  {(l.interests || []).length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 5 }}>
+                      {(l.interests || []).slice(0, 2).map(iid => {
+                        const it = interests.find(x => x.id === iid);
+                        return it ? <span key={iid} style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "#EEEDFE", color: "#3C3489" }}>{it.name}</span> : null;
+                      })}
+                      {(l.interests || []).length > 2 && <span style={{ fontSize: 9, color: "#aaa" }}>+{l.interests.length - 2}</span>}
+                    </div>
+                  )}
                   <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
                     <button style={{ ...S.btnWA, padding: "3px 8px", fontSize: 11 }} onClick={e => { e.stopPropagation(); onWA(l); }}>WA</button>
                     <button style={{ ...S.btnSecondary, padding: "3px 7px", fontSize: 11 }} onClick={e => { e.stopPropagation(); window.open("tel:" + l.phone); }}>📞</button>
                     <button style={{ ...S.btnSecondary, padding: "3px 7px", fontSize: 11 }} onClick={e => { e.stopPropagation(); onHistory(l); }}>📋</button>
                     <button style={{ ...S.btnSecondary, padding: "3px 7px", fontSize: 11, color: "#c00" }} onClick={e => { e.stopPropagation(); if (confirm("حذف؟")) onDelete(l.id); }}>🗑</button>
                   </div>
-                  {l.comment && <div style={{ fontSize: 10, color: "#999", marginTop: 5, paddingTop: 4, borderTop: "1px solid #f0f0f0", fontStyle: "italic" }}>{l.comment.substring(0, 55)}{l.comment.length > 55 ? "…" : ""}</div>}
+                  {l.comment && <div style={{ fontSize: 10, color: "#999", marginTop: 5, paddingTop: 4, borderTop: "1px solid #f0f0f0", fontStyle: "italic" }}>{l.comment.substring(0, 50)}{l.comment.length > 50 ? "…" : ""}</div>}
                   {l.alert_text && <div style={{ fontSize: 10, color: "#c07000", marginTop: 3 }}>🔔 {l.alert_text}</div>}
                 </div>
               ))}
@@ -311,81 +450,88 @@ function KanbanView({ leads, onEdit, onDelete, onWA, onHistory }) {
 }
 
 // ── Table ──────────────────────────────────────────────────────────
-function TableView({ leads, onEdit, onDelete, onWA, onHistory }) {
-  const [q, setQ] = useState("");
-  const [stg, setStg] = useState("");
-  const filtered = leads.filter(l => {
-    const mq = !q || l.name.includes(q) || l.phone.includes(q) || (l.job||"").includes(q);
-    return mq && (!stg || l.stage === stg);
-  });
+function TableView({ leads, interests, onEdit, onDelete, onWA, onHistory }) {
   const th = { padding: "8px 12px", textAlign: "right", fontSize: 12, color: "#666", fontWeight: 700, borderBottom: "2px solid #eee" };
   const td = { padding: "9px 12px", fontSize: 13, color: "#1a1a1a", borderBottom: "1px solid #f0f0f0", verticalAlign: "middle" };
   return (
-    <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
-        <input style={{ ...S.inputBase, flex: 1, minWidth: 160, height: 36 }} value={q} onChange={e => setQ(e.target.value)} placeholder="ابحث باسم أو رقم أو وظيفة..." />
-        <select style={{ ...S.inputBase, width: "auto", height: 36 }} value={stg} onChange={e => setStg(e.target.value)}>
-          <option value="">كل المراحل</option>
-          {STAGES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-        </select>
-      </div>
-      <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700 }}>
-          <thead><tr>{["الاسم","الهاتف","الوظيفة","المرحلة","تعليق","تنبيه","إجراءات"].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
-          <tbody>
-            {filtered.length === 0 && <tr><td colSpan={7} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد نتائج</td></tr>}
-            {filtered.map(l => {
-              const si = stageInfo(l.stage);
-              return (
-                <tr key={l.id} onMouseEnter={e => e.currentTarget.style.background = "#fafafa"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  <td style={{ ...td, fontWeight: 700 }}>{l.name}</td>
-                  <td style={{ ...td, direction: "ltr", textAlign: "right" }}>{l.phone}</td>
-                  <td style={{ ...td, color: "#666" }}>{l.job || "—"}</td>
-                  <td style={td}><span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 12, fontWeight: 700, background: si.bg, color: si.text }}>{si.label}</span></td>
-                  <td style={{ ...td, fontSize: 12, color: "#888" }}>{l.comment ? l.comment.substring(0, 40) + "…" : "—"}</td>
-                  <td style={{ ...td, fontSize: 12, color: "#b07800" }}>{l.alert_text || "—"}</td>
-                  <td style={td}>
-                    <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
-                      <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => onEdit(l)}>تعديل</button>
-                      <button style={{ ...S.btnWA, padding: "4px 9px", fontSize: 12 }} onClick={() => onWA(l)}>WA</button>
-                      <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => window.open("tel:" + l.phone)}>📞</button>
-                      <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => onHistory(l)}>📋</button>
-                      <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12, color: "#c00" }} onClick={() => { if (confirm("حذف؟")) onDelete(l.id); }}>🗑</button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+    <div style={{ overflowX: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 800 }}>
+        <thead><tr>{["اسم الشهرة","الموبايل","الوظيفة","مجالات الاهتمام","المرحلة","تنبيه","إجراءات"].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <tbody>
+          {leads.length === 0 && <tr><td colSpan={7} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد نتائج</td></tr>}
+          {leads.map(l => {
+            const si = stageInfo(l.stage);
+            return (
+              <tr key={l.id} onMouseEnter={e => e.currentTarget.style.background = "#fafafa"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <td style={{ ...td, fontWeight: 700 }}>{l.nickname || l.name || "—"}</td>
+                <td style={{ ...td, direction: "ltr", textAlign: "right" }}>{l.phone}</td>
+                <td style={{ ...td, color: "#666" }}>{l.job || "—"}</td>
+                <td style={td}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                    {(l.interests || []).map(iid => {
+                      const it = interests.find(x => x.id === iid);
+                      return it ? <span key={iid} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 8, background: "#EEEDFE", color: "#3C3489", fontWeight: 600 }}>{it.name}</span> : null;
+                    })}
+                    {(l.interests || []).length === 0 && <span style={{ color: "#ccc" }}>—</span>}
+                  </div>
+                </td>
+                <td style={td}><span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 12, fontWeight: 700, background: si.bg, color: si.text }}>{si.label}</span></td>
+                <td style={{ ...td, fontSize: 12, color: "#b07800" }}>{l.alert_text || "—"}</td>
+                <td style={td}>
+                  <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                    <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => onEdit(l)}>تعديل</button>
+                    <button style={{ ...S.btnWA, padding: "4px 9px", fontSize: 12 }} onClick={() => onWA(l)}>WA</button>
+                    <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => window.open("tel:" + l.phone)}>📞</button>
+                    <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => onHistory(l)}>📋</button>
+                    <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12, color: "#c00" }} onClick={() => { if (confirm("حذف؟")) onDelete(l.id); }}>🗑</button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
 
 // ── Messages Library ───────────────────────────────────────────────
-function MsgsView({ messages, onAdd, onEdit, onDelete }) {
+function MsgsView({ messages, projects, onAdd, onEdit, onDelete, onManageProjects }) {
+  const [projFilter, setProjFilter] = useState("");
+  const filtered = projFilter ? messages.filter(m => String(m.project_id) === projFilter) : messages;
   return (
     <div>
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+      <div style={{ display: "flex", gap: 8, justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <select style={{ ...S.inputBase, width: "auto", minWidth: 180 }} value={projFilter} onChange={e => setProjFilter(e.target.value)}>
+            <option value="">كل المشروعات</option>
+            {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+          </select>
+          <button style={S.btnSecondary} onClick={onManageProjects}>إدارة المشروعات</button>
+        </div>
         <button style={S.btnPrimary} onClick={onAdd}>+ رسالة جديدة</button>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
-        {messages.map(m => (
-          <div key={m.id} style={S.card}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-              <span style={{ fontSize: 14, fontWeight: 700, color: "#1a1a1a" }}>{m.title}</span>
-              <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "#E6F1FB", color: "#185FA5", fontWeight: 700 }}>{m.tag}</span>
+        {filtered.length === 0 && <div style={{ color: "#aaa", fontSize: 13, padding: "2rem", gridColumn: "1/-1", textAlign: "center" }}>لا توجد رسائل</div>}
+        {filtered.map(m => {
+          const proj = projects.find(p => p.id === m.project_id);
+          return (
+            <div key={m.id} style={S.card}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, gap: 6 }}>
+                <span style={{ fontSize: 14, fontWeight: 700, color: "#1a1a1a" }}>{m.title}</span>
+                <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "#E6F1FB", color: "#185FA5", fontWeight: 700 }}>{m.tag}</span>
+              </div>
+              {proj && <div style={{ marginBottom: 6 }}><span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "#FAEEDA", color: "#633806", fontWeight: 700 }}>{proj.name}</span></div>}
+              <div style={{ fontSize: 12, color: "#666", lineHeight: 1.7, marginBottom: 10, whiteSpace: "pre-wrap", minHeight: 50 }}>
+                {m.body.length > 110 ? m.body.substring(0, 110) + "…" : m.body}
+              </div>
+              <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", borderTop: "1px solid #f0f0f0", paddingTop: 8 }}>
+                <button style={{ ...S.btnSecondary, padding: "4px 10px", fontSize: 12 }} onClick={() => onEdit(m)}>تعديل</button>
+                <button style={{ ...S.btnSecondary, padding: "4px 10px", fontSize: 12, color: "#c00" }} onClick={() => { if (confirm("حذف؟")) onDelete(m.id); }}>حذف</button>
+              </div>
             </div>
-            <div style={{ fontSize: 12, color: "#666", lineHeight: 1.7, marginBottom: 10, whiteSpace: "pre-wrap", minHeight: 56 }}>
-              {m.body.length > 110 ? m.body.substring(0, 110) + "…" : m.body}
-            </div>
-            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", borderTop: "1px solid #f0f0f0", paddingTop: 8 }}>
-              <button style={{ ...S.btnSecondary, padding: "4px 10px", fontSize: 12 }} onClick={() => onEdit(m)}>تعديل</button>
-              <button style={{ ...S.btnSecondary, padding: "4px 10px", fontSize: 12, color: "#c00" }} onClick={() => { if (confirm("حذف؟")) onDelete(m.id); }}>حذف</button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -394,10 +540,10 @@ function MsgsView({ messages, onAdd, onEdit, onDelete }) {
 // ── Stats Bar ──────────────────────────────────────────────────────
 function StatsBar({ leads, messages }) {
   const stats = [
-    { label: "إجمالي Leads",   val: leads.length,                                      color: "#4F5BD5" },
-    { label: "Closing",         val: leads.filter(l => l.stage === "closing").length,   color: "#3B6D11" },
-    { label: "تنبيهات نشطة",  val: leads.filter(l => l.alert_text?.trim()).length,     color: "#BA7517" },
-    { label: "رسائل المكتبة", val: messages.length,                                    color: "#D4537E" },
+    { label: "إجمالي Leads",   val: leads.length,                                    color: "#4F5BD5" },
+    { label: "Closing",         val: leads.filter(l => l.stage === "closing").length, color: "#3B6D11" },
+    { label: "تنبيهات نشطة",  val: leads.filter(l => l.alert_text?.trim()).length,   color: "#BA7517" },
+    { label: "رسائل المكتبة", val: messages.length,                                  color: "#D4537E" },
   ];
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
@@ -413,66 +559,82 @@ function StatsBar({ leads, messages }) {
 
 // ── Main App ───────────────────────────────────────────────────────
 export default function App() {
-  const [leads,    setLeads]    = useState([]);
-  const [messages, setMessages] = useState([]);
-  const [history,  setHistory]  = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [saving,   setSaving]   = useState(false);
-  const [toast,    setToast]    = useState(null);
-  const [tab,      setTab]      = useState("kanban");
-  const [modal,    setModal]    = useState(null);
+  const [leads,     setLeads]     = useState([]);
+  const [messages,  setMessages]  = useState([]);
+  const [history,   setHistory]   = useState([]);
+  const [interests, setInterests] = useState([]);
+  const [projects,  setProjects]  = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [saving,    setSaving]    = useState(false);
+  const [toast,     setToast]     = useState(null);
+  const [tab,       setTab]       = useState("kanban");
+  const [modal,     setModal]     = useState(null);
+
+  const [q, setQ] = useState("");
+  const [stageFilter, setStageFilter] = useState("");
+  const [interestFilter, setInterestFilter] = useState("");
 
   const showToast = useCallback((msg, type = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   }, []);
 
-  // ── Fetch all data ────────────────────────────────────────────────
   useEffect(() => {
     async function fetchAll() {
       setLoading(true);
-      const [{ data: lData }, { data: mData }, { data: hData }] = await Promise.all([
+      const [l, m, h, i, p] = await Promise.all([
         supabase.from("leads").select("*").order("created_at", { ascending: false }),
         supabase.from("messages").select("*").order("created_at", { ascending: true }),
         supabase.from("lead_history").select("*").order("created_at", { ascending: true }),
+        supabase.from("interests").select("*").order("name"),
+        supabase.from("projects").select("*").order("name"),
       ]);
-      setLeads(lData || []);
-      // seed default messages if empty
-      if (!mData || mData.length === 0) {
-        const { data: seeded } = await supabase.from("messages").insert(DEFAULT_MSGS).select();
-        setMessages(seeded || []);
-      } else {
-        setMessages(mData);
-      }
-      setHistory(hData || []);
+      setLeads(l.data || []);
+      setMessages(m.data || []);
+      setHistory(h.data || []);
+      setInterests(i.data || []);
+      setProjects(p.data || []);
       setLoading(false);
     }
     fetchAll();
   }, []);
 
-  // ── Lead CRUD ─────────────────────────────────────────────────────
+  const filteredLeads = useMemo(() => leads.filter(l => {
+    const text = `${l.nickname || ""} ${l.name || ""} ${l.phone || ""} ${l.job || ""}`;
+    const mq = !q || text.includes(q);
+    const ms = !stageFilter || l.stage === stageFilter;
+    const mi = !interestFilter || (l.interests || []).includes(Number(interestFilter));
+    return mq && ms && mi;
+  }), [leads, q, stageFilter, interestFilter]);
+
   const saveLead = useCallback(async (form, selectedMsg) => {
     setSaving(true);
-    const editingLead = modal?.data;
-    if (editingLead?.id) {
-      // update
-      const stageChanged = form.stage !== editingLead.stage;
-      const { data, error } = await supabase.from("leads").update({ ...form, updated_at: new Date().toISOString() }).eq("id", editingLead.id).select().single();
+    const editing = modal?.data;
+    const payload = {
+      nickname: form.nickname, phone: form.phone, name: form.name || null,
+      job: form.job || null, comment: form.comment || null,
+      alert_text: form.alert_text || null, interests: form.interests,
+    };
+    if (editing?.id) {
+      const stageChanged = form.stage !== editing.stage;
+      const { data, error } = await supabase.from("leads")
+        .update({ ...payload, stage: form.stage, updated_at: new Date().toISOString() })
+        .eq("id", editing.id).select().single();
       if (error) { showToast("خطأ في الحفظ", "error"); setSaving(false); return; }
       setLeads(prev => prev.map(l => l.id === data.id ? data : l));
       if (stageChanged) {
-        const { data: h } = await supabase.from("lead_history").insert({ lead_id: data.id, stage: form.stage, comment: form.comment }).select().single();
+        const { data: h } = await supabase.from("lead_history")
+          .insert({ lead_id: data.id, stage: form.stage, comment: form.comment }).select().single();
         if (h) setHistory(prev => [...prev, h]);
       }
       showToast("تم الحفظ ✓");
     } else {
-      // insert
-      const { data, error } = await supabase.from("leads").insert({ ...form, stage: "lead" }).select().single();
+      const { data, error } = await supabase.from("leads").insert({ ...payload, stage: "lead" }).select().single();
       if (error) { showToast("خطأ في الإضافة", "error"); setSaving(false); return; }
       setLeads(prev => [data, ...prev]);
       await supabase.from("lead_history").insert({ lead_id: data.id, stage: "lead", comment: form.comment });
-      if (selectedMsg) sendWA(form.phone, selectedMsg.body, form.name);
-      showToast("تمت الإضافة وفُتح واتساب ✓");
+      if (selectedMsg) sendWA(form.phone, selectedMsg.body, form);
+      showToast("تمت الإضافة ✓");
     }
     setSaving(false);
     setModal(null);
@@ -486,23 +648,24 @@ export default function App() {
     showToast("تم الحذف");
   }, [showToast]);
 
-  // ── Message CRUD ──────────────────────────────────────────────────
   const saveMsg = useCallback(async (form) => {
     if (!form.title.trim() || !form.body.trim()) { alert("العنوان والنص مطلوبين"); return; }
     setSaving(true);
-    const editingMsg = modal?.data;
-    if (editingMsg?.id) {
-      const { data, error } = await supabase.from("messages").update(form).eq("id", editingMsg.id).select().single();
+    const editing = modal?.data;
+    const payload = {
+      title: form.title, tag: form.tag, body: form.body,
+      project_id: form.project_id ? Number(form.project_id) : null,
+    };
+    if (editing?.id) {
+      const { data, error } = await supabase.from("messages").update(payload).eq("id", editing.id).select().single();
       if (error) { showToast("خطأ في الحفظ", "error"); setSaving(false); return; }
       setMessages(prev => prev.map(m => m.id === data.id ? data : m));
     } else {
-      const { data, error } = await supabase.from("messages").insert(form).select().single();
+      const { data, error } = await supabase.from("messages").insert(payload).select().single();
       if (error) { showToast("خطأ في الإضافة", "error"); setSaving(false); return; }
       setMessages(prev => [...prev, data]);
     }
-    setSaving(false);
-    setModal(null);
-    showToast("تم الحفظ ✓");
+    setSaving(false); setModal(null); showToast("تم الحفظ ✓");
   }, [modal, showToast]);
 
   const deleteMsg = useCallback(async (id) => {
@@ -511,15 +674,28 @@ export default function App() {
     showToast("تم الحذف");
   }, [showToast]);
 
-  const TABS = [{ id: "kanban", label: "Kanban Board" }, { id: "table", label: "جدول" }, { id: "msgs", label: "مكتبة الرسائل" }];
+  const addLookup = useCallback(async (table, name, setter) => {
+    setSaving(true);
+    const { data, error } = await supabase.from(table).insert({ name }).select().single();
+    setSaving(false);
+    if (error) { showToast("الاسم موجود بالفعل أو حدث خطأ", "error"); return; }
+    setter(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name, "ar")));
+    showToast("تمت الإضافة ✓");
+  }, [showToast]);
 
+  const deleteLookup = useCallback(async (table, id, setter) => {
+    await supabase.from(table).delete().eq("id", id);
+    setter(prev => prev.filter(x => x.id !== id));
+    showToast("تم الحذف");
+  }, [showToast]);
+
+  const TABS = [{ id: "kanban", label: "Kanban Board" }, { id: "table", label: "جدول" }, { id: "msgs", label: "مكتبة الرسائل" }];
   const leadHistory = modal?.data?.id ? history.filter(h => h.lead_id === modal.data.id) : [];
 
   return (
     <div dir="rtl" style={{ fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", background: "#f5f5f7", minHeight: "100vh", paddingBottom: "2rem" }}>
       {toast && <Toast msg={toast.msg} type={toast.type} />}
 
-      {/* Header */}
       <div style={{ background: "#fff", borderBottom: "1px solid #eee", padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <span style={{ fontSize: 20, fontWeight: 800, color: "#1a1a1a" }}>Sales CRM</span>
@@ -532,7 +708,8 @@ export default function App() {
         {loading ? <Spinner /> : (
           <>
             <StatsBar leads={leads} messages={messages} />
-            <div style={{ display: "flex", gap: 6, marginBottom: 20, background: "#efefef", borderRadius: 10, padding: 4, width: "fit-content" }}>
+
+            <div style={{ display: "flex", gap: 6, marginBottom: 16, background: "#efefef", borderRadius: 10, padding: 4, width: "fit-content" }}>
               {TABS.map(t => (
                 <button key={t.id} onClick={() => setTab(t.id)}
                   style={{ padding: "7px 18px", fontSize: 13, fontWeight: tab === t.id ? 700 : 500, borderRadius: 8, border: "none", cursor: "pointer", background: tab === t.id ? "#fff" : "transparent", color: tab === t.id ? "#1a1a1a" : "#666", boxShadow: tab === t.id ? "0 1px 4px rgba(0,0,0,.08)" : "none" }}>
@@ -540,25 +717,60 @@ export default function App() {
                 </button>
               ))}
             </div>
-            {tab === "kanban" && <KanbanView leads={leads} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
-            {tab === "table"  && <TableView  leads={leads} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
-            {tab === "msgs"   && <MsgsView messages={messages} onAdd={() => setModal({ type: "add-msg" })} onEdit={m => setModal({ type: "edit-msg", data: m })} onDelete={deleteMsg} />}
+
+            {tab !== "msgs" && (
+              <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+                <input style={{ ...S.inputBase, flex: 1, minWidth: 180, maxWidth: 320, height: 36 }} value={q} onChange={e => setQ(e.target.value)} placeholder="ابحث بالاسم أو الموبايل..." />
+                <select style={{ ...S.inputBase, width: "auto", height: 36 }} value={stageFilter} onChange={e => setStageFilter(e.target.value)}>
+                  <option value="">كل المراحل</option>
+                  {STAGES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                </select>
+                <select style={{ ...S.inputBase, width: "auto", height: 36 }} value={interestFilter} onChange={e => setInterestFilter(e.target.value)}>
+                  <option value="">كل مجالات الاهتمام</option>
+                  {interests.map(i => <option key={i.id} value={String(i.id)}>{i.name}</option>)}
+                </select>
+                {(q || stageFilter || interestFilter) && (
+                  <button style={{ ...S.btnSecondary, height: 36, padding: "0 14px" }}
+                    onClick={() => { setQ(""); setStageFilter(""); setInterestFilter(""); }}>مسح الفلاتر</button>
+                )}
+                <button style={{ ...S.btnSecondary, height: 36, padding: "0 14px" }}
+                  onClick={() => setModal({ type: "manage-interests" })}>إدارة مجالات الاهتمام</button>
+              </div>
+            )}
+
+            {tab === "kanban" && <KanbanView leads={filteredLeads} interests={interests} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
+            {tab === "table"  && <TableView  leads={filteredLeads} interests={interests} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
+            {tab === "msgs"   && <MsgsView messages={messages} projects={projects} onAdd={() => setModal({ type: "add-msg" })} onEdit={m => setModal({ type: "edit-msg", data: m })} onDelete={deleteMsg} onManageProjects={() => setModal({ type: "manage-projects" })} />}
           </>
         )}
       </div>
 
-      {/* Modals */}
       {(modal?.type === "add-lead" || modal?.type === "edit-lead") && (
-        <LeadModal lead={modal.data} messages={messages} onSave={saveLead} onClose={() => setModal(null)} loading={saving} />
+        <LeadModal lead={modal.data} messages={messages} projects={projects} interests={interests}
+          onSave={saveLead} onClose={() => setModal(null)} loading={saving}
+          onManageInterests={() => setModal({ type: "manage-interests" })} />
       )}
       {modal?.type === "send-wa" && (
-        <SendWAModal lead={modal.data} messages={messages} onClose={() => setModal(null)} />
+        <SendWAModal lead={modal.data} messages={messages} projects={projects} onClose={() => setModal(null)} />
       )}
       {(modal?.type === "add-msg" || modal?.type === "edit-msg") && (
-        <MsgModal msg={modal.data} onSave={saveMsg} onClose={() => setModal(null)} loading={saving} />
+        <MsgModal msg={modal.data} projects={projects} onSave={saveMsg} onClose={() => setModal(null)} loading={saving}
+          onManageProjects={() => setModal({ type: "manage-projects" })} />
       )}
       {modal?.type === "history" && (
         <HistoryModal lead={modal.data} history={leadHistory} onClose={() => setModal(null)} />
+      )}
+      {modal?.type === "manage-interests" && (
+        <ManageListModal title="إدارة مجالات الاهتمام" items={interests} saving={saving}
+          onAdd={name => addLookup("interests", name, setInterests)}
+          onDelete={id => deleteLookup("interests", id, setInterests)}
+          onClose={() => setModal(null)} />
+      )}
+      {modal?.type === "manage-projects" && (
+        <ManageListModal title="إدارة المشروعات" items={projects} saving={saving}
+          onAdd={name => addLookup("projects", name, setProjects)}
+          onDelete={id => deleteLookup("projects", id, setProjects)}
+          onClose={() => setModal(null)} />
       )}
     </div>
   );
