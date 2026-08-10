@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "./supabase.js";
 
 const STAGES = [
@@ -159,10 +159,48 @@ function ManageListModal({ title, items, onAdd, onDelete, onClose, saving, showC
   );
 }
 
-function AlertBadge({ date }) {
+function AlertBadge({ date, note }) {
   const info = alertLabel(date);
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e) { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("click", onDocClick);
+    return () => document.removeEventListener("click", onDocClick);
+  }, [open]);
+
   if (!info) return <span style={{ color: "#ccc" }}>—</span>;
-  return <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, fontWeight: 700, background: info.bg, color: info.color, whiteSpace: "nowrap" }}>🔔 {info.text}</span>;
+  const hasNote = note && note.trim();
+
+  return (
+    <span ref={wrapRef} style={{ position: "relative", display: "inline-block" }}
+      onMouseEnter={() => hasNote && setOpen(true)}
+      onMouseLeave={() => hasNote && setOpen(false)}>
+      <span
+        onClick={e => { if (hasNote) { e.stopPropagation(); setOpen(v => !v); } }}
+        style={{
+          fontSize: 10, padding: "2px 8px", borderRadius: 10, fontWeight: 700,
+          background: info.bg, color: info.color, whiteSpace: "nowrap",
+          cursor: hasNote ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: 3,
+        }}>
+        🔔 {info.text}
+        {hasNote && <span style={{ width: 4, height: 4, borderRadius: "50%", background: info.color, display: "inline-block" }} />}
+      </span>
+      {open && hasNote && (
+        <span style={{
+          position: "absolute", bottom: "calc(100% + 6px)", right: 0, zIndex: 50,
+          background: "#1a1a1a", color: "#fff", fontSize: 11, lineHeight: 1.5,
+          padding: "7px 10px", borderRadius: 8, whiteSpace: "normal", width: 180,
+          boxShadow: "0 4px 12px rgba(0,0,0,.25)",
+        }}>
+          {note}
+          <span style={{ position: "absolute", top: "100%", right: 10, width: 0, height: 0, borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderTop: "5px solid #1a1a1a" }} />
+        </span>
+      )}
+    </span>
+  );
 }
 
 // ── Lead Modal ─────────────────────────────────────────────────────
@@ -171,7 +209,7 @@ function LeadModal({ lead, messages, projects, interests, onSave, onClose, loadi
   const [form, setForm] = useState({
     nickname: lead?.nickname || "", phone: lead?.phone || "", name: lead?.name || "",
     job: lead?.job || "", stage: lead?.stage || "lead", comment: lead?.comment || "",
-    alert_date: lead?.alert_date || "", interests: lead?.interests || [],
+    alert_date: lead?.alert_date || "", alert_note: lead?.alert_note || "", interests: lead?.interests || [],
   });
   const [selectedMsg, setSelectedMsg] = useState(() => !isEdit ? (messages.find(m => m.tag === "Lead") || messages[0] || null) : null);
   const [showPicker, setShowPicker] = useState(!isEdit);
@@ -203,7 +241,13 @@ function LeadModal({ lead, messages, projects, interests, onSave, onClose, loadi
       <Field label="تعليق"><textarea style={{ ...S.inputBase, height: 60, resize: "vertical" }} value={form.comment} onChange={set("comment")} placeholder="اختياري" /></Field>
       <Field label="تاريخ التنبيه / المتابعة">
         <input type="date" style={S.inputBase} value={form.alert_date} onChange={set("alert_date")} min={todayStr()} />
-        {form.alert_date && <div style={{ marginTop: 4 }}><AlertBadge date={form.alert_date} /></div>}
+        {form.alert_date && (
+          <>
+            <input style={{ ...S.inputBase, marginTop: 8 }} value={form.alert_note} onChange={set("alert_note")}
+              placeholder="ملاحظة قصيرة تظهر عند تمرير الماوس أو الضغط على التاريخ (اختياري)" />
+            <div style={{ marginTop: 6 }}><AlertBadge date={form.alert_date} note={form.alert_note} /></div>
+          </>
+        )}
       </Field>
 
       {!isEdit && (
@@ -386,7 +430,7 @@ function KanbanView({ leads, interests, onEdit, onDelete, onWA, onHistory }) {
                     <button style={{ ...S.btnSecondary, padding: "3px 7px", fontSize: 11, color: "#c00" }} onClick={e => { e.stopPropagation(); if (confirm("حذف؟")) onDelete(l.id); }}>🗑</button>
                   </div>
                   {l.comment && <div style={{ fontSize: 10, color: "#999", marginTop: 5, paddingTop: 4, borderTop: "1px solid #f0f0f0", fontStyle: "italic" }}>{l.comment.substring(0, 50)}{l.comment.length > 50 ? "…" : ""}</div>}
-                  {l.alert_date && <div style={{ marginTop: 4 }}><AlertBadge date={l.alert_date} /></div>}
+                  {l.alert_date && <div style={{ marginTop: 4 }}><AlertBadge date={l.alert_date} note={l.alert_note} /></div>}
                 </div>
               ))}
             </div>
@@ -419,7 +463,7 @@ function TableView({ leads, interests, onEdit, onDelete, onWA, onHistory }) {
                 </div>
               </td>
               <td style={td}><span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 12, fontWeight: 700, background: si.bg, color: si.text }}>{si.label}</span></td>
-              <td style={td}><AlertBadge date={l.alert_date} /></td>
+              <td style={td}><AlertBadge date={l.alert_date} note={l.alert_note} /></td>
               <td style={td}>
                 <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                   <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => onEdit(l)}>تعديل</button>
@@ -557,7 +601,7 @@ export default function App() {
     const payload = {
       nickname: form.nickname, phone: form.phone, name: form.name || null,
       job: form.job || null, comment: form.comment || null,
-      alert_date: form.alert_date || null, interests: form.interests,
+      alert_date: form.alert_date || null, alert_note: form.alert_note || null, interests: form.interests,
     };
     if (editing?.id) {
       const stageChanged = form.stage !== editing.stage;
