@@ -205,8 +205,8 @@ function AlertBadge({ date, note, done }) {
   );
 }
 
-// ── Multi-select stage filter ──────────────────────────────────────
-function StagePicker({ selected, onChange }) {
+// ── Generic multi-select dropdown ─────────────────────────────────
+function MultiSelectPicker({ label: defaultLabel, options, selected, onChange, activeColor = "#4F5BD5", activeBg = "#EEEDFE", activeText = "#3C3489" }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   useEffect(() => {
@@ -215,35 +215,51 @@ function StagePicker({ selected, onChange }) {
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [open]);
-  const label = selected.length === 0 ? "كل المراحل" : selected.length === 1 ? STAGES.find(s => s.id === selected[0])?.label : `${selected.length} مراحل`;
+
+  const selCount = selected.length;
+  const btnLabel = selCount === 0 ? defaultLabel
+    : selCount === 1 ? (options.find(o => o.id === selected[0])?.label || defaultLabel)
+    : `${selCount} محدد`;
+
   return (
     <div ref={ref} style={{ position: "relative" }}>
       <button onClick={() => setOpen(v => !v)}
-        style={{ height: 36, padding: "0 12px", fontSize: 13, border: "1px solid #ddd", borderRadius: 8, background: selected.length ? "#EEEDFE" : "#fafafa", color: selected.length ? "#3C3489" : "#444", cursor: "pointer", whiteSpace: "nowrap", fontWeight: selected.length ? 700 : 400, display: "flex", alignItems: "center", gap: 6 }}>
-        {label} <span style={{ fontSize: 10, color: "#888" }}>▾</span>
+        style={{ height: 36, padding: "0 12px", fontSize: 13, border: "1px solid #ddd", borderRadius: 8, background: selCount ? activeBg : "#fafafa", color: selCount ? activeText : "#444", cursor: "pointer", whiteSpace: "nowrap", fontWeight: selCount ? 700 : 400, display: "flex", alignItems: "center", gap: 6 }}>
+        {btnLabel} <span style={{ fontSize: 10, color: "#888" }}>▾</span>
       </button>
       {open && (
-        <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, background: "#fff", border: "1px solid #ddd", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,.12)", zIndex: 100, minWidth: 180, padding: 6 }}>
-          {STAGES.map(s => {
-            const on = selected.includes(s.id);
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, background: "#fff", border: "1px solid #ddd", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,.12)", zIndex: 100, minWidth: 190, padding: 6, maxHeight: 280, overflowY: "auto" }}>
+          {options.map(o => {
+            const on = selected.includes(o.id);
             return (
-              <div key={s.id} onClick={() => onChange(on ? selected.filter(x => x !== s.id) : [...selected, s.id])}
-                style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 7, cursor: "pointer", background: on ? s.bg : "transparent" }}>
-                <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${s.color}`, background: on ? s.color : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <div key={o.id} onClick={() => onChange(on ? selected.filter(x => x !== o.id) : [...selected, o.id])}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 7, cursor: "pointer", background: on ? (o.bg || activeBg) : "transparent" }}>
+                <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${o.color || activeColor}`, background: on ? (o.color || activeColor) : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   {on && <span style={{ color: "#fff", fontSize: 9, fontWeight: 900 }}>✓</span>}
                 </span>
-                <span style={{ fontSize: 13, fontWeight: on ? 700 : 400, color: on ? s.text : "#444" }}>{s.label}</span>
+                <span style={{ fontSize: 13, fontWeight: on ? 700 : 400, color: on ? (o.text || activeText) : "#444" }}>{o.label}</span>
               </div>
             );
           })}
-          {selected.length > 0 && (
-            <div onClick={() => onChange([])} style={{ fontSize: 11, color: "#c00", textAlign: "center", padding: "6px 0 2px", cursor: "pointer", borderTop: "1px solid #eee", marginTop: 4 }}>مسح الاختيار</div>
+          {selCount > 0 && (
+            <div onClick={() => { onChange([]); setOpen(false); }} style={{ fontSize: 11, color: "#c00", textAlign: "center", padding: "6px 0 2px", cursor: "pointer", borderTop: "1px solid #eee", marginTop: 4 }}>مسح الاختيار</div>
           )}
         </div>
       )}
     </div>
   );
 }
+
+// ── Alert filter options ───────────────────────────────────────────
+const ALERT_OPTIONS = [
+  { id: "today",   label: "اليوم",         color: "#D97706", bg: "#FEF3C7", text: "#92400E" },
+  { id: "tomorrow",label: "غداً",          color: "#2563EB", bg: "#DBEAFE", text: "#1E3A8A" },
+  { id: "week",    label: "هذا الأسبوع",   color: "#6B7FD4", bg: "#EEEDFE", text: "#3C3489" },
+  { id: "overdue", label: "متأخرة",        color: "#DC2626", bg: "#FEE2E2", text: "#7F1D1D" },
+  { id: "has",     label: "لها تنبيه",     color: "#555",   bg: "#f0f0f0", text: "#333"    },
+  { id: "done",    label: "تم التنبيه",    color: "#3B6D11", bg: "#EAF3DE", text: "#173404" },
+  { id: "notdone", label: "لم يتم بعد",   color: "#BA7517", bg: "#FAEEDA", text: "#633806" },
+];
 
 // ── Lead Modal ─────────────────────────────────────────────────────
 function LeadModal({ lead, messages, projects, interests, onSave, onClose, loading, onManageInterests }) {
@@ -495,10 +511,24 @@ function KanbanView({ leads, interests, onEdit, onDelete, onWA, onHistory }) {
 function TableView({ leads, interests, onEdit, onDelete, onWA, onHistory, sortConfig, onSort }) {
   const sorted = useMemo(() => {
     const arr = [...leads];
-    if (sortConfig.key === "alert_date") return arr.sort(sortByAlert).map(x => x);
-    if (sortConfig.key === "name") return arr.sort((a, b) => (a.name || a.nickname || "").localeCompare(b.name || b.nickname || "", "ar") * (sortConfig.dir === "asc" ? 1 : -1));
-    if (sortConfig.key === "stage") return arr.sort((a, b) => { const ai = STAGES.findIndex(s => s.id === a.stage); const bi = STAGES.findIndex(s => s.id === b.stage); return (ai - bi) * (sortConfig.dir === "asc" ? 1 : -1); });
-    return arr.sort(sortByAlert);
+    if (sortConfig.key === "alert_date") return arr.sort((a, b) => {
+      const da = a.alert_date || "9999-12-31"; const db = b.alert_date || "9999-12-31";
+      return sortConfig.dir === "asc" ? da.localeCompare(db) : db.localeCompare(da);
+    });
+    if (sortConfig.key === "created_at") return arr.sort((a, b) => {
+      const da = a.created_at || ""; const db = b.created_at || "";
+      return sortConfig.dir === "asc" ? da.localeCompare(db) : db.localeCompare(da);
+    });
+    if (sortConfig.key === "name") return arr.sort((a, b) => {
+      const na = a.name || a.nickname || ""; const nb = b.name || b.nickname || "";
+      return na.localeCompare(nb, "ar") * (sortConfig.dir === "asc" ? 1 : -1);
+    });
+    if (sortConfig.key === "stage") return arr.sort((a, b) => {
+      const ai = STAGES.findIndex(s => s.id === a.stage);
+      const bi = STAGES.findIndex(s => s.id === b.stage);
+      return (ai - bi) * (sortConfig.dir === "asc" ? 1 : -1);
+    });
+    return arr;
   }, [leads, sortConfig]);
 
   const th = { padding: "8px 12px", textAlign: "right", fontSize: 12, color: "#666", fontWeight: 700, borderBottom: "2px solid #eee", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" };
@@ -519,10 +549,11 @@ function TableView({ leads, interests, onEdit, onDelete, onWA, onHistory, sortCo
           <th style={{ ...th, cursor: "default" }}>مجالات الاهتمام</th>
           <th style={th} onClick={() => onSort("stage")}>المرحلة<SortIcon k="stage" /></th>
           <th style={th} onClick={() => onSort("alert_date")}>تنبيه<SortIcon k="alert_date" /></th>
+          <th style={th} onClick={() => onSort("created_at")}>تاريخ الإضافة<SortIcon k="created_at" /></th>
           <th style={{ ...th, cursor: "default" }}>إجراءات</th>
         </tr></thead>
         <tbody>
-          {sorted.length === 0 && <tr><td colSpan={7} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد نتائج</td></tr>}
+          {sorted.length === 0 && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد نتائج</td></tr>}
           {sorted.map(l => { const si = stageInfo(l.stage); return (
             <tr key={l.id} onMouseEnter={e => e.currentTarget.style.background = "#fafafa"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
               <td style={{ ...td, fontWeight: 700 }}>{l.name || l.nickname || "—"}</td>
@@ -536,6 +567,9 @@ function TableView({ leads, interests, onEdit, onDelete, onWA, onHistory, sortCo
               </td>
               <td style={td}><span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 12, fontWeight: 700, background: si.bg, color: si.text }}>{si.label}</span></td>
               <td style={td}><AlertBadge date={l.alert_date} note={l.alert_note} done={l.alert_done} /></td>
+              <td style={{ ...td, fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
+                {l.created_at ? new Date(l.created_at).toLocaleDateString("ar-EG", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+              </td>
               <td style={td}>
                 <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                   <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => onEdit(l)}>تعديل</button>
@@ -628,9 +662,9 @@ export default function App() {
 
   const [q, setQ] = useState("");
   const [stageFilters, setStageFilters] = useState([]);
-  const [interestFilter, setInterestFilter] = useState("");
-  const [alertFilter, setAlertFilter] = useState("");
-  const [sortConfig, setSortConfig] = useState({ key: "alert_date", dir: "asc" });
+  const [interestFilters, setInterestFilters] = useState([]);
+  const [alertFilters, setAlertFilters] = useState([]);
+  const [sortConfig, setSortConfig] = useState({ key: "created_at", dir: "desc" });
 
   function handleSort(key) {
     setSortConfig(prev => prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
@@ -662,17 +696,23 @@ export default function App() {
       const text = `${l.nickname || ""} ${l.name || ""} ${l.phone || ""} ${l.job || ""}`;
       if (q && !text.includes(q)) return false;
       if (stageFilters.length > 0 && !stageFilters.includes(l.stage)) return false;
-      if (interestFilter && !(l.interests || []).includes(Number(interestFilter))) return false;
-      if (alertFilter === "today" && l.alert_date !== today) return false;
-      if (alertFilter === "tomorrow" && l.alert_date !== tmrw) return false;
-      if (alertFilter === "week" && (!l.alert_date || l.alert_date < today || l.alert_date > eow)) return false;
-      if (alertFilter === "overdue" && (!l.alert_date || l.alert_date >= today)) return false;
-      if (alertFilter === "has" && !l.alert_date) return false;
-      if (alertFilter === "done" && !l.alert_done) return false;
-      if (alertFilter === "notdone" && (l.alert_done || !l.alert_date)) return false;
+      if (interestFilters.length > 0 && !interestFilters.some(id => (l.interests || []).includes(Number(id)))) return false;
+      if (alertFilters.length > 0) {
+        const matchAlert = alertFilters.some(f => {
+          if (f === "today")    return l.alert_date === today;
+          if (f === "tomorrow") return l.alert_date === tmrw;
+          if (f === "week")     return l.alert_date && l.alert_date >= today && l.alert_date <= eow;
+          if (f === "overdue")  return l.alert_date && l.alert_date < today;
+          if (f === "has")      return !!l.alert_date;
+          if (f === "done")     return !!l.alert_done;
+          if (f === "notdone")  return l.alert_date && !l.alert_done;
+          return false;
+        });
+        if (!matchAlert) return false;
+      }
       return true;
     });
-  }, [leads, q, stageFilters, interestFilter, alertFilter]);
+  }, [leads, q, stageFilters, interestFilters, alertFilters]);
 
   const saveLead = useCallback(async (form, selectedMsg) => {
     setSaving(true);
@@ -757,7 +797,7 @@ export default function App() {
 
   const TABS = [{ id: "kanban", label: "Kanban Board" }, { id: "table", label: "جدول" }, { id: "msgs", label: "مكتبة الرسائل" }];
   const leadHistory = modal?.data?.id ? history.filter(h => h.lead_id === modal.data.id) : [];
-  const hasFilters = q || stageFilters.length > 0 || interestFilter || alertFilter;
+  const hasFilters = q || stageFilters.length > 0 || interestFilters.length > 0 || alertFilters.length > 0;
 
   return (
     <div dir="rtl" style={{ fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", background: "#f5f5f7", minHeight: "100vh", paddingBottom: "2rem" }}>
@@ -788,24 +828,26 @@ export default function App() {
             {tab !== "msgs" && (
               <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
                 <input style={{ ...S.inputBase, flex: 1, minWidth: 160, maxWidth: 280, height: 36 }} value={q} onChange={e => setQ(e.target.value)} placeholder="ابحث بالاسم أو الموبايل..." />
-                <StagePicker selected={stageFilters} onChange={setStageFilters} />
-                <select style={{ ...S.inputBase, width: "auto", height: 36 }} value={interestFilter} onChange={e => setInterestFilter(e.target.value)}>
-                  <option value="">كل المجالات</option>
-                  {interests.map(i => <option key={i.id} value={String(i.id)}>{i.name}</option>)}
-                </select>
-                <select style={{ ...S.inputBase, width: "auto", height: 36 }} value={alertFilter} onChange={e => setAlertFilter(e.target.value)}>
-                  <option value="">كل التنبيهات</option>
-                  <option value="today">اليوم</option>
-                  <option value="tomorrow">غداً</option>
-                  <option value="week">هذا الأسبوع</option>
-                  <option value="overdue">متأخرة</option>
-                  <option value="has">لها تنبيه</option>
-                  <option value="done">تم التنبيه</option>
-                  <option value="notdone">لم يتم بعد</option>
-                </select>
+                <MultiSelectPicker
+                  label="كل المراحل"
+                  options={STAGES.map(s => ({ id: s.id, label: s.label, color: s.color, bg: s.bg, text: s.text }))}
+                  selected={stageFilters} onChange={setStageFilters}
+                />
+                <MultiSelectPicker
+                  label="كل المجالات"
+                  options={interests.map(i => ({ id: String(i.id), label: i.name, color: "#6B7FD4", bg: "#EEEDFE", text: "#3C3489" }))}
+                  selected={interestFilters} onChange={setInterestFilters}
+                  activeColor="#6B7FD4" activeBg="#EEEDFE" activeText="#3C3489"
+                />
+                <MultiSelectPicker
+                  label="كل التنبيهات"
+                  options={ALERT_OPTIONS}
+                  selected={alertFilters} onChange={setAlertFilters}
+                  activeColor="#D97706" activeBg="#FEF3C7" activeText="#92400E"
+                />
                 {hasFilters && (
                   <button style={{ ...S.btnSecondary, height: 36, padding: "0 14px" }}
-                    onClick={() => { setQ(""); setStageFilters([]); setInterestFilter(""); setAlertFilter(""); }}>مسح الفلاتر</button>
+                    onClick={() => { setQ(""); setStageFilters([]); setInterestFilters([]); setAlertFilters([]); }}>مسح الفلاتر</button>
                 )}
               </div>
             )}
