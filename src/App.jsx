@@ -159,7 +159,7 @@ function ManageListModal({ title, items, onAdd, onDelete, onClose, saving, showC
   );
 }
 
-function AlertBadge({ date, note }) {
+function AlertBadge({ date, note, done }) {
   const info = alertLabel(date);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -173,20 +173,22 @@ function AlertBadge({ date, note }) {
 
   if (!info) return <span style={{ color: "#ccc" }}>—</span>;
   const hasNote = note && note.trim();
+  const bg = done ? "#f0f0f0" : info.bg;
+  const color = done ? "#999" : info.color;
 
   return (
     <span ref={wrapRef} style={{ position: "relative", display: "inline-block" }}
       onMouseEnter={() => hasNote && setOpen(true)}
       onMouseLeave={() => hasNote && setOpen(false)}>
-      <span
-        onClick={e => { if (hasNote) { e.stopPropagation(); setOpen(v => !v); } }}
+      <span onClick={e => { if (hasNote) { e.stopPropagation(); setOpen(v => !v); } }}
         style={{
           fontSize: 10, padding: "2px 8px", borderRadius: 10, fontWeight: 700,
-          background: info.bg, color: info.color, whiteSpace: "nowrap",
+          background: bg, color, whiteSpace: "nowrap",
           cursor: hasNote ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: 3,
+          textDecoration: done ? "line-through" : "none", opacity: done ? 0.7 : 1,
         }}>
-        🔔 {info.text}
-        {hasNote && <span style={{ width: 4, height: 4, borderRadius: "50%", background: info.color, display: "inline-block" }} />}
+        {done ? "✅" : "🔔"} {info.text}
+        {hasNote && !done && <span style={{ width: 4, height: 4, borderRadius: "50%", background: color, display: "inline-block" }} />}
       </span>
       {open && hasNote && (
         <span style={{
@@ -203,13 +205,54 @@ function AlertBadge({ date, note }) {
   );
 }
 
+// ── Multi-select stage filter ──────────────────────────────────────
+function StagePicker({ selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    function h(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+  const label = selected.length === 0 ? "كل المراحل" : selected.length === 1 ? STAGES.find(s => s.id === selected[0])?.label : `${selected.length} مراحل`;
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button onClick={() => setOpen(v => !v)}
+        style={{ height: 36, padding: "0 12px", fontSize: 13, border: "1px solid #ddd", borderRadius: 8, background: selected.length ? "#EEEDFE" : "#fafafa", color: selected.length ? "#3C3489" : "#444", cursor: "pointer", whiteSpace: "nowrap", fontWeight: selected.length ? 700 : 400, display: "flex", alignItems: "center", gap: 6 }}>
+        {label} <span style={{ fontSize: 10, color: "#888" }}>▾</span>
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, background: "#fff", border: "1px solid #ddd", borderRadius: 10, boxShadow: "0 4px 16px rgba(0,0,0,.12)", zIndex: 100, minWidth: 180, padding: 6 }}>
+          {STAGES.map(s => {
+            const on = selected.includes(s.id);
+            return (
+              <div key={s.id} onClick={() => onChange(on ? selected.filter(x => x !== s.id) : [...selected, s.id])}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 7, cursor: "pointer", background: on ? s.bg : "transparent" }}>
+                <span style={{ width: 14, height: 14, borderRadius: 3, border: `2px solid ${s.color}`, background: on ? s.color : "transparent", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  {on && <span style={{ color: "#fff", fontSize: 9, fontWeight: 900 }}>✓</span>}
+                </span>
+                <span style={{ fontSize: 13, fontWeight: on ? 700 : 400, color: on ? s.text : "#444" }}>{s.label}</span>
+              </div>
+            );
+          })}
+          {selected.length > 0 && (
+            <div onClick={() => onChange([])} style={{ fontSize: 11, color: "#c00", textAlign: "center", padding: "6px 0 2px", cursor: "pointer", borderTop: "1px solid #eee", marginTop: 4 }}>مسح الاختيار</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Lead Modal ─────────────────────────────────────────────────────
 function LeadModal({ lead, messages, projects, interests, onSave, onClose, loading, onManageInterests }) {
   const isEdit = !!lead?.id;
   const [form, setForm] = useState({
     nickname: lead?.nickname || "", phone: lead?.phone || "", name: lead?.name || "",
     job: lead?.job || "", stage: lead?.stage || "lead", comment: lead?.comment || "",
-    alert_date: lead?.alert_date || "", alert_note: lead?.alert_note || "", interests: lead?.interests || [],
+    alert_date: lead?.alert_date || "", alert_note: lead?.alert_note || "",
+    alert_done: lead?.alert_done || false, interests: lead?.interests || [],
   });
   const [selectedMsg, setSelectedMsg] = useState(() => !isEdit ? (messages.find(m => m.tag === "Lead") || messages[0] || null) : null);
   const [showPicker, setShowPicker] = useState(!isEdit);
@@ -245,7 +288,15 @@ function LeadModal({ lead, messages, projects, interests, onSave, onClose, loadi
           <>
             <input style={{ ...S.inputBase, marginTop: 8 }} value={form.alert_note} onChange={set("alert_note")}
               placeholder="ملاحظة قصيرة تظهر عند تمرير الماوس أو الضغط على التاريخ (اختياري)" />
-            <div style={{ marginTop: 6 }}><AlertBadge date={form.alert_date} note={form.alert_note} /></div>
+            <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 10 }}>
+              <AlertBadge date={form.alert_date} note={form.alert_note} done={form.alert_done} />
+              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#555" }}>
+                <input type="checkbox" checked={!!form.alert_done}
+                  onChange={e => setForm(f => ({ ...f, alert_done: e.target.checked }))}
+                  style={{ width: 15, height: 15, cursor: "pointer", accentColor: "#3B6D11" }} />
+                تم التنبيه
+              </label>
+            </div>
           </>
         )}
       </Field>
@@ -430,7 +481,7 @@ function KanbanView({ leads, interests, onEdit, onDelete, onWA, onHistory }) {
                     <button style={{ ...S.btnSecondary, padding: "3px 7px", fontSize: 11, color: "#c00" }} onClick={e => { e.stopPropagation(); if (confirm("حذف؟")) onDelete(l.id); }}>🗑</button>
                   </div>
                   {l.comment && <div style={{ fontSize: 10, color: "#999", marginTop: 5, paddingTop: 4, borderTop: "1px solid #f0f0f0", fontStyle: "italic" }}>{l.comment.substring(0, 50)}{l.comment.length > 50 ? "…" : ""}</div>}
-                  {l.alert_date && <div style={{ marginTop: 4 }}><AlertBadge date={l.alert_date} note={l.alert_note} /></div>}
+                  {l.alert_date && <div style={{ marginTop: 4 }}><AlertBadge date={l.alert_date} note={l.alert_note} done={l.alert_done} /></div>}
                 </div>
               ))}
             </div>
@@ -441,19 +492,40 @@ function KanbanView({ leads, interests, onEdit, onDelete, onWA, onHistory }) {
   );
 }
 
-function TableView({ leads, interests, onEdit, onDelete, onWA, onHistory }) {
-  const sorted = [...leads].sort(sortByAlert);
-  const th = { padding: "8px 12px", textAlign: "right", fontSize: 12, color: "#666", fontWeight: 700, borderBottom: "2px solid #eee" };
+function TableView({ leads, interests, onEdit, onDelete, onWA, onHistory, sortConfig, onSort }) {
+  const sorted = useMemo(() => {
+    const arr = [...leads];
+    if (sortConfig.key === "alert_date") return arr.sort(sortByAlert).map(x => x);
+    if (sortConfig.key === "name") return arr.sort((a, b) => (a.name || a.nickname || "").localeCompare(b.name || b.nickname || "", "ar") * (sortConfig.dir === "asc" ? 1 : -1));
+    if (sortConfig.key === "stage") return arr.sort((a, b) => { const ai = STAGES.findIndex(s => s.id === a.stage); const bi = STAGES.findIndex(s => s.id === b.stage); return (ai - bi) * (sortConfig.dir === "asc" ? 1 : -1); });
+    return arr.sort(sortByAlert);
+  }, [leads, sortConfig]);
+
+  const th = { padding: "8px 12px", textAlign: "right", fontSize: 12, color: "#666", fontWeight: 700, borderBottom: "2px solid #eee", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" };
   const td = { padding: "9px 12px", fontSize: 13, color: "#1a1a1a", borderBottom: "1px solid #f0f0f0", verticalAlign: "middle" };
+
+  function SortIcon({ k }) {
+    if (sortConfig.key !== k) return <span style={{ color: "#ccc", fontSize: 10 }}> ⇅</span>;
+    return <span style={{ fontSize: 10, color: "#4F5BD5" }}>{sortConfig.dir === "asc" ? " ↑" : " ↓"}</span>;
+  }
+
   return (
     <div style={{ overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 850 }}>
-        <thead><tr>{["اسم الشهرة","الموبايل","الوظيفة","مجالات الاهتمام","المرحلة","تنبيه","إجراءات"].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+        <thead><tr>
+          <th style={th} onClick={() => onSort("name")}>الاسم الكامل<SortIcon k="name" /></th>
+          <th style={{ ...th, cursor: "default" }}>الموبايل</th>
+          <th style={{ ...th, cursor: "default" }}>الوظيفة</th>
+          <th style={{ ...th, cursor: "default" }}>مجالات الاهتمام</th>
+          <th style={th} onClick={() => onSort("stage")}>المرحلة<SortIcon k="stage" /></th>
+          <th style={th} onClick={() => onSort("alert_date")}>تنبيه<SortIcon k="alert_date" /></th>
+          <th style={{ ...th, cursor: "default" }}>إجراءات</th>
+        </tr></thead>
         <tbody>
           {sorted.length === 0 && <tr><td colSpan={7} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد نتائج</td></tr>}
           {sorted.map(l => { const si = stageInfo(l.stage); return (
             <tr key={l.id} onMouseEnter={e => e.currentTarget.style.background = "#fafafa"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-              <td style={{ ...td, fontWeight: 700 }}>{l.nickname || l.name || "—"}</td>
+              <td style={{ ...td, fontWeight: 700 }}>{l.name || l.nickname || "—"}</td>
               <td style={{ ...td, direction: "ltr", textAlign: "right" }}>{l.phone}</td>
               <td style={{ ...td, color: "#666" }}>{l.job || "—"}</td>
               <td style={td}>
@@ -463,7 +535,7 @@ function TableView({ leads, interests, onEdit, onDelete, onWA, onHistory }) {
                 </div>
               </td>
               <td style={td}><span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 12, fontWeight: 700, background: si.bg, color: si.text }}>{si.label}</span></td>
-              <td style={td}><AlertBadge date={l.alert_date} note={l.alert_note} /></td>
+              <td style={td}><AlertBadge date={l.alert_date} note={l.alert_note} done={l.alert_done} /></td>
               <td style={td}>
                 <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                   <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => onEdit(l)}>تعديل</button>
@@ -555,9 +627,14 @@ export default function App() {
   const [modal, setModal] = useState(null);
 
   const [q, setQ] = useState("");
-  const [stageFilter, setStageFilter] = useState("");
+  const [stageFilters, setStageFilters] = useState([]);
   const [interestFilter, setInterestFilter] = useState("");
   const [alertFilter, setAlertFilter] = useState("");
+  const [sortConfig, setSortConfig] = useState({ key: "alert_date", dir: "asc" });
+
+  function handleSort(key) {
+    setSortConfig(prev => prev.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+  }
 
   const showToast = useCallback((msg, type = "success") => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000); }, []);
 
@@ -584,13 +661,15 @@ export default function App() {
     return leads.filter(l => {
       const text = `${l.nickname || ""} ${l.name || ""} ${l.phone || ""} ${l.job || ""}`;
       if (q && !text.includes(q)) return false;
-      if (stageFilter && l.stage !== stageFilter) return false;
+      if (stageFilters.length > 0 && !stageFilters.includes(l.stage)) return false;
       if (interestFilter && !(l.interests || []).includes(Number(interestFilter))) return false;
       if (alertFilter === "today" && l.alert_date !== today) return false;
       if (alertFilter === "tomorrow" && l.alert_date !== tmrw) return false;
       if (alertFilter === "week" && (!l.alert_date || l.alert_date < today || l.alert_date > eow)) return false;
       if (alertFilter === "overdue" && (!l.alert_date || l.alert_date >= today)) return false;
       if (alertFilter === "has" && !l.alert_date) return false;
+      if (alertFilter === "done" && !l.alert_done) return false;
+      if (alertFilter === "notdone" && (l.alert_done || !l.alert_date)) return false;
       return true;
     });
   }, [leads, q, stageFilter, interestFilter, alertFilter]);
@@ -601,7 +680,8 @@ export default function App() {
     const payload = {
       nickname: form.nickname, phone: form.phone, name: form.name || null,
       job: form.job || null, comment: form.comment || null,
-      alert_date: form.alert_date || null, alert_note: form.alert_note || null, interests: form.interests,
+      alert_date: form.alert_date || null, alert_note: form.alert_note || null,
+      alert_done: !!form.alert_done, interests: form.interests,
     };
     if (editing?.id) {
       const stageChanged = form.stage !== editing.stage;
@@ -677,7 +757,7 @@ export default function App() {
 
   const TABS = [{ id: "kanban", label: "Kanban Board" }, { id: "table", label: "جدول" }, { id: "msgs", label: "مكتبة الرسائل" }];
   const leadHistory = modal?.data?.id ? history.filter(h => h.lead_id === modal.data.id) : [];
-  const hasFilters = q || stageFilter || interestFilter || alertFilter;
+  const hasFilters = q || stageFilters.length > 0 || interestFilter || alertFilter;
 
   return (
     <div dir="rtl" style={{ fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", background: "#f5f5f7", minHeight: "100vh", paddingBottom: "2rem" }}>
@@ -707,11 +787,8 @@ export default function App() {
 
             {tab !== "msgs" && (
               <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-                <input style={{ ...S.inputBase, flex: 1, minWidth: 160, maxWidth: 300, height: 36 }} value={q} onChange={e => setQ(e.target.value)} placeholder="ابحث بالاسم أو الموبايل..." />
-                <select style={{ ...S.inputBase, width: "auto", height: 36 }} value={stageFilter} onChange={e => setStageFilter(e.target.value)}>
-                  <option value="">كل المراحل</option>
-                  {STAGES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
-                </select>
+                <input style={{ ...S.inputBase, flex: 1, minWidth: 160, maxWidth: 280, height: 36 }} value={q} onChange={e => setQ(e.target.value)} placeholder="ابحث بالاسم أو الموبايل..." />
+                <StagePicker selected={stageFilters} onChange={setStageFilters} />
                 <select style={{ ...S.inputBase, width: "auto", height: 36 }} value={interestFilter} onChange={e => setInterestFilter(e.target.value)}>
                   <option value="">كل المجالات</option>
                   {interests.map(i => <option key={i.id} value={String(i.id)}>{i.name}</option>)}
@@ -723,16 +800,18 @@ export default function App() {
                   <option value="week">هذا الأسبوع</option>
                   <option value="overdue">متأخرة</option>
                   <option value="has">لها تنبيه</option>
+                  <option value="done">تم التنبيه</option>
+                  <option value="notdone">لم يتم بعد</option>
                 </select>
                 {hasFilters && (
                   <button style={{ ...S.btnSecondary, height: 36, padding: "0 14px" }}
-                    onClick={() => { setQ(""); setStageFilter(""); setInterestFilter(""); setAlertFilter(""); }}>مسح الفلاتر</button>
+                    onClick={() => { setQ(""); setStageFilters([]); setInterestFilter(""); setAlertFilter(""); }}>مسح الفلاتر</button>
                 )}
               </div>
             )}
 
             {tab === "kanban" && <KanbanView leads={filteredLeads} interests={interests} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
-            {tab === "table"  && <TableView  leads={filteredLeads} interests={interests} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
+            {tab === "table"  && <TableView  leads={filteredLeads} interests={interests} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} sortConfig={sortConfig} onSort={handleSort} />}
             {tab === "msgs"   && <MsgsView messages={messages} projects={projects} onAdd={() => setModal({ type: "add-msg" })} onEdit={m => setModal({ type: "edit-msg", data: m })} onDelete={deleteMsg} onManageProjects={() => setModal({ type: "manage-projects" })} />}
           </>
         )}
