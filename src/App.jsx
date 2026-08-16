@@ -672,7 +672,7 @@ export default function App() {
       if (alertFilter === "notdone" && (l.alert_done || !l.alert_date)) return false;
       return true;
     });
-  }, [leads, q, stageFilter, interestFilter, alertFilter]);
+  }, [leads, q, stageFilters, interestFilter, alertFilter]);
 
   const saveLead = useCallback(async (form, selectedMsg) => {
     setSaving(true);
