@@ -587,9 +587,54 @@ function TableView({ leads, interests, onEdit, onDelete, onWA, onHistory, sortCo
   );
 }
 
-function MsgsView({ messages, projects, onAdd, onEdit, onDelete, onManageProjects }) {
+function MsgsView({ messages, projects, onAdd, onEdit, onDelete, onManageProjects, onReorder }) {
   const [projFilter, setProjFilter] = useState("");
+  const [dragIdx, setDragIdx] = useState(null);
+  const [overIdx, setOverIdx] = useState(null);
+  const [reordering, setReordering] = useState(false);
+
+  // when filtered, drag reorders within the filtered subset mapped back to full list
   const filtered = projFilter ? messages.filter(m => String(m.project_id) === projFilter) : messages;
+
+  function handleDragStart(e, idx) {
+    setDragIdx(idx);
+    e.dataTransfer.effectAllowed = "move";
+  }
+  function handleDragOver(e, idx) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setOverIdx(idx);
+  }
+  function handleDrop(e, dropIdx) {
+    e.preventDefault();
+    if (dragIdx === null || dragIdx === dropIdx) { setDragIdx(null); setOverIdx(null); return; }
+
+    // reorder within filtered subset, then rebuild full messages array
+    const newFiltered = [...filtered];
+    const [moved] = newFiltered.splice(dragIdx, 1);
+    newFiltered.splice(dropIdx, 0, moved);
+
+    if (!projFilter) {
+      // no filter → full reorder
+      onReorder(newFiltered);
+    } else {
+      // with filter → rebuild full list preserving non-filtered positions
+      const filteredIds = new Set(newFiltered.map(m => m.id));
+      const rest = messages.filter(m => !filteredIds.has(m.id));
+      // interleave: keep non-filtered in their relative positions, insert filtered in new order
+      let fi = 0;
+      const result = messages.map(m => filteredIds.has(m.id) ? newFiltered[fi++] : m);
+      // simpler: just put filtered in new order at their original positions in the full list
+      const full = [...messages];
+      const filteredPositions = messages.reduce((acc, m, i) => filteredIds.has(m.id) ? [...acc, i] : acc, []);
+      filteredPositions.forEach((pos, i) => { full[pos] = newFiltered[i]; });
+      onReorder(full);
+    }
+    setDragIdx(null);
+    setOverIdx(null);
+  }
+  function handleDragEnd() { setDragIdx(null); setOverIdx(null); }
+
   return (
     <div>
       <div style={{ display: "flex", gap: 8, justifyContent: "space-between", marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
@@ -602,18 +647,47 @@ function MsgsView({ messages, projects, onAdd, onEdit, onDelete, onManageProject
         </div>
         <button style={S.btnPrimary} onClick={onAdd}>+ رسالة جديدة</button>
       </div>
+
+      {/* hint */}
+      <div style={{ fontSize: 11, color: "#999", marginBottom: 10, display: "flex", alignItems: "center", gap: 5 }}>
+        <span>⠿</span> اسحب البطاقات لإعادة الترتيب — يُحفظ تلقائياً
+      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
         {filtered.length === 0 && <div style={{ color: "#aaa", fontSize: 13, padding: "2rem", gridColumn: "1/-1", textAlign: "center" }}>لا توجد رسائل</div>}
-        {filtered.map(m => {
+        {filtered.map((m, idx) => {
           const proj = projects.find(p => p.id === m.project_id);
+          const isDragging = dragIdx === idx;
+          const isOver = overIdx === idx && dragIdx !== idx;
           return (
-            <div key={m.id} style={{ ...S.card, borderTop: proj ? `3px solid ${projColor(proj)}` : "1px solid #eee" }}>
+            <div key={m.id}
+              draggable
+              onDragStart={e => handleDragStart(e, idx)}
+              onDragOver={e => handleDragOver(e, idx)}
+              onDrop={e => handleDrop(e, idx)}
+              onDragEnd={handleDragEnd}
+              style={{
+                ...S.card,
+                borderTop: proj ? `3px solid ${projColor(proj)}` : "1px solid #eee",
+                opacity: isDragging ? 0.4 : 1,
+                outline: isOver ? "2px dashed #4F5BD5" : "none",
+                outlineOffset: 2,
+                cursor: "grab",
+                transition: "opacity .15s, outline .1s",
+                userSelect: "none",
+              }}>
+              {/* drag handle */}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, gap: 6 }}>
-                <span style={{ fontSize: 14, fontWeight: 700 }}>{m.title}</span>
-                <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "#E6F1FB", color: "#185FA5", fontWeight: 700 }}>{m.tag}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 16, color: "#ccc", lineHeight: 1, cursor: "grab" }}>⠿</span>
+                  <span style={{ fontSize: 14, fontWeight: 700 }}>{m.title}</span>
+                </div>
+                <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: "#E6F1FB", color: "#185FA5", fontWeight: 700, flexShrink: 0 }}>{m.tag}</span>
               </div>
               {proj && <div style={{ marginBottom: 6 }}><span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 10, background: projBg(proj), color: projColor(proj), fontWeight: 700 }}>{proj.name}</span></div>}
-              <div style={{ fontSize: 12, color: "#666", lineHeight: 1.7, marginBottom: 10, whiteSpace: "pre-wrap", minHeight: 50 }}>{m.body.length > 110 ? m.body.substring(0, 110) + "…" : m.body}</div>
+              <div style={{ fontSize: 12, color: "#666", lineHeight: 1.7, marginBottom: 10, whiteSpace: "pre-wrap", minHeight: 50 }}>
+                {m.body.length > 110 ? m.body.substring(0, 110) + "…" : m.body}
+              </div>
               <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", borderTop: "1px solid #f0f0f0", paddingTop: 8 }}>
                 <button style={{ ...S.btnSecondary, padding: "4px 10px", fontSize: 12 }} onClick={() => onEdit(m)}>تعديل</button>
                 <button style={{ ...S.btnSecondary, padding: "4px 10px", fontSize: 12, color: "#c00" }} onClick={() => { if (confirm("حذف؟")) onDelete(m.id); }}>حذف</button>
@@ -677,7 +751,7 @@ export default function App() {
       setLoading(true);
       const [l, m, h, i, p] = await Promise.all([
         supabase.from("leads").select("*").order("created_at", { ascending: false }),
-        supabase.from("messages").select("*").order("created_at", { ascending: true }),
+        supabase.from("messages").select("*").order("sort_order", { ascending: true }),
         supabase.from("lead_history").select("*").order("created_at", { ascending: true }),
         supabase.from("interests").select("*").order("name"),
         supabase.from("projects").select("*").order("name"),
@@ -762,18 +836,29 @@ export default function App() {
       if (error) { showToast("خطأ", "error"); setSaving(false); return; }
       setMessages(prev => prev.map(m => m.id === data.id ? data : m));
     } else {
-      const { data, error } = await supabase.from("messages").insert(payload).select().single();
+      const maxOrder = messages.reduce((mx, m) => Math.max(mx, m.sort_order || 0), 0);
+      const { data, error } = await supabase.from("messages").insert({ ...payload, sort_order: maxOrder + 1 }).select().single();
       if (error) { showToast("خطأ", "error"); setSaving(false); return; }
       setMessages(prev => [...prev, data]);
     }
     setSaving(false); setModal(null); showToast("تم الحفظ ✓");
-  }, [modal, showToast]);
+  }, [modal, messages, showToast]);
 
   const deleteMsg = useCallback(async (id) => {
     await supabase.from("messages").delete().eq("id", id);
     setMessages(prev => prev.filter(m => m.id !== id));
     showToast("تم الحذف");
   }, [showToast]);
+
+  const reorderMsgs = useCallback(async (newOrder) => {
+    // newOrder = array of messages in new order
+    setMessages(newOrder);
+    // save sort_order for each message in background
+    const updates = newOrder.map((m, i) =>
+      supabase.from("messages").update({ sort_order: i + 1 }).eq("id", m.id)
+    );
+    await Promise.all(updates);
+  }, []);
 
   const addLookup = useCallback(async (table, name, setter) => {
     setSaving(true);
@@ -854,7 +939,7 @@ export default function App() {
 
             {tab === "kanban" && <KanbanView leads={filteredLeads} interests={interests} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
             {tab === "table"  && <TableView  leads={filteredLeads} interests={interests} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} sortConfig={sortConfig} onSort={handleSort} />}
-            {tab === "msgs"   && <MsgsView messages={messages} projects={projects} onAdd={() => setModal({ type: "add-msg" })} onEdit={m => setModal({ type: "edit-msg", data: m })} onDelete={deleteMsg} onManageProjects={() => setModal({ type: "manage-projects" })} />}
+            {tab === "msgs"   && <MsgsView messages={messages} projects={projects} onAdd={() => setModal({ type: "add-msg" })} onEdit={m => setModal({ type: "edit-msg", data: m })} onDelete={deleteMsg} onManageProjects={() => setModal({ type: "manage-projects" })} onReorder={reorderMsgs} />}
           </>
         )}
       </div>
