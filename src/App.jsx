@@ -468,7 +468,7 @@ function HistoryModal({ lead, history, onClose }) {
   );
 }
 
-function KanbanView({ leads, interests, onEdit, onDelete, onWA, onHistory }) {
+function KanbanView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHistory }) {
   return (
     <div style={{ overflowX: "auto", paddingBottom: 8 }}>
       <div style={{ display: "flex", gap: 10, minWidth: 1000 }}>
@@ -482,7 +482,12 @@ function KanbanView({ leads, interests, onEdit, onDelete, onWA, onHistory }) {
               {cards.map(l => (
                 <div key={l.id} onClick={() => onEdit(l)} style={{ background: "#fff", border: "1px solid #e8e8e8", borderRadius: 9, padding: "8px 9px", marginBottom: 8, cursor: "pointer" }}
                   onMouseEnter={e => e.currentTarget.style.borderColor = s.color} onMouseLeave={e => e.currentTarget.style.borderColor = "#e8e8e8"}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a", marginBottom: 2 }}>{l.nickname || l.name || l.phone}</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a", marginBottom: 2, display: "flex", alignItems: "center", gap: 5 }}>
+                    {l.nickname || l.name || l.phone}
+                    {dupPhones.has((l.phone || "").replace(/\s/g, "")) && (
+                      <span title="رقم مكرر" style={{ fontSize: 10, background: "#FEE2E2", color: "#DC2626", padding: "1px 5px", borderRadius: 6, fontWeight: 700 }}>مكرر</span>
+                    )}
+                  </div>
                   {l.job && <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{l.job}</div>}
                   {(l.interests || []).length > 0 && (
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 5 }}>
@@ -508,7 +513,7 @@ function KanbanView({ leads, interests, onEdit, onDelete, onWA, onHistory }) {
   );
 }
 
-function TableView({ leads, interests, onEdit, onDelete, onWA, onHistory, sortConfig, onSort }) {
+function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHistory, sortConfig, onSort }) {
   const sorted = useMemo(() => {
     const arr = [...leads];
     if (sortConfig.key === "alert_date") return arr.sort((a, b) => {
@@ -557,7 +562,14 @@ function TableView({ leads, interests, onEdit, onDelete, onWA, onHistory, sortCo
           {sorted.map(l => { const si = stageInfo(l.stage); return (
             <tr key={l.id} onMouseEnter={e => e.currentTarget.style.background = "#fafafa"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
               <td style={{ ...td, fontWeight: 700 }}>{l.name || l.nickname || "—"}</td>
-              <td style={{ ...td, direction: "ltr", textAlign: "right" }}>{l.phone}</td>
+              <td style={{ ...td, direction: "ltr", textAlign: "right" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end" }}>
+                  {dupPhones.has((l.phone || "").replace(/\s/g, "")) && (
+                    <span style={{ fontSize: 10, background: "#FEE2E2", color: "#DC2626", padding: "1px 5px", borderRadius: 6, fontWeight: 700, direction: "rtl" }}>مكرر</span>
+                  )}
+                  {l.phone}
+                </div>
+              </td>
               <td style={{ ...td, color: "#666" }}>{l.job || "—"}</td>
               <td style={td}>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
@@ -738,6 +750,11 @@ export default function App() {
   const [stageFilters, setStageFilters] = useState([]);
   const [interestFilters, setInterestFilters] = useState([]);
   const [alertFilters, setAlertFilters] = useState([]);
+  const [jobFilter, setJobFilter] = useState("");
+  const [dateField, setDateField] = useState(""); // "created_at" | "alert_date"
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [showDupes, setShowDupes] = useState(false);
   const [sortConfig, setSortConfig] = useState({ key: "created_at", dir: "desc" });
 
   function handleSort(key) {
@@ -762,6 +779,16 @@ export default function App() {
     fetchAll();
   }, []);
 
+  // حساب الأرقام المكررة
+  const dupPhones = useMemo(() => {
+    const counts = {};
+    leads.forEach(l => {
+      const p = (l.phone || "").replace(/\s/g, "");
+      if (p) counts[p] = (counts[p] || 0) + 1;
+    });
+    return new Set(Object.keys(counts).filter(p => counts[p] > 1));
+  }, [leads]);
+
   const filteredLeads = useMemo(() => {
     const today = todayStr();
     const tmrw = tomorrowStr();
@@ -771,6 +798,8 @@ export default function App() {
       if (q && !text.includes(q)) return false;
       if (stageFilters.length > 0 && !stageFilters.includes(l.stage)) return false;
       if (interestFilters.length > 0 && !interestFilters.some(id => (l.interests || []).includes(Number(id)))) return false;
+      if (jobFilter && !(l.job || "").includes(jobFilter)) return false;
+      if (showDupes && !dupPhones.has((l.phone || "").replace(/\s/g, ""))) return false;
       if (alertFilters.length > 0) {
         const matchAlert = alertFilters.some(f => {
           if (f === "today")    return l.alert_date === today;
@@ -784,9 +813,17 @@ export default function App() {
         });
         if (!matchAlert) return false;
       }
+      if (dateField && dateFrom) {
+        const val = dateField === "created_at" ? (l.created_at || "").substring(0, 10) : (l.alert_date || "");
+        if (!val || val < dateFrom) return false;
+      }
+      if (dateField && dateTo) {
+        const val = dateField === "created_at" ? (l.created_at || "").substring(0, 10) : (l.alert_date || "");
+        if (!val || val > dateTo) return false;
+      }
       return true;
     });
-  }, [leads, q, stageFilters, interestFilters, alertFilters]);
+  }, [leads, q, stageFilters, interestFilters, alertFilters, jobFilter, showDupes, dupPhones, dateField, dateFrom, dateTo]);
 
   const saveLead = useCallback(async (form, selectedMsg) => {
     setSaving(true);
@@ -882,7 +919,7 @@ export default function App() {
 
   const TABS = [{ id: "kanban", label: "Kanban Board" }, { id: "table", label: "جدول" }, { id: "msgs", label: "مكتبة الرسائل" }];
   const leadHistory = modal?.data?.id ? history.filter(h => h.lead_id === modal.data.id) : [];
-  const hasFilters = q || stageFilters.length > 0 || interestFilters.length > 0 || alertFilters.length > 0;
+  const hasFilters = q || stageFilters.length > 0 || interestFilters.length > 0 || alertFilters.length > 0 || jobFilter || showDupes || dateFrom || dateTo;
 
   return (
     <div dir="rtl" style={{ fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", background: "#f5f5f7", minHeight: "100vh", paddingBottom: "2rem" }}>
@@ -911,34 +948,60 @@ export default function App() {
             </div>
 
             {tab !== "msgs" && (
-              <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-                <input style={{ ...S.inputBase, flex: 1, minWidth: 160, maxWidth: 280, height: 36 }} value={q} onChange={e => setQ(e.target.value)} placeholder="ابحث بالاسم أو الموبايل..." />
-                <MultiSelectPicker
-                  label="كل المراحل"
-                  options={STAGES.map(s => ({ id: s.id, label: s.label, color: s.color, bg: s.bg, text: s.text }))}
-                  selected={stageFilters} onChange={setStageFilters}
-                />
-                <MultiSelectPicker
-                  label="كل المجالات"
-                  options={interests.map(i => ({ id: String(i.id), label: i.name, color: "#6B7FD4", bg: "#EEEDFE", text: "#3C3489" }))}
-                  selected={interestFilters} onChange={setInterestFilters}
-                  activeColor="#6B7FD4" activeBg="#EEEDFE" activeText="#3C3489"
-                />
-                <MultiSelectPicker
-                  label="كل التنبيهات"
-                  options={ALERT_OPTIONS}
-                  selected={alertFilters} onChange={setAlertFilters}
-                  activeColor="#D97706" activeBg="#FEF3C7" activeText="#92400E"
-                />
-                {hasFilters && (
-                  <button style={{ ...S.btnSecondary, height: 36, padding: "0 14px" }}
-                    onClick={() => { setQ(""); setStageFilters([]); setInterestFilters([]); setAlertFilters([]); }}>مسح الفلاتر</button>
-                )}
+              <div style={{ marginBottom: 16 }}>
+                {/* Row 1: search + stage + interests + alerts + dupes */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <input style={{ ...S.inputBase, flex: 1, minWidth: 160, maxWidth: 260, height: 36 }} value={q} onChange={e => setQ(e.target.value)} placeholder="ابحث بالاسم أو الموبايل..." />
+                  <MultiSelectPicker
+                    label="كل المراحل"
+                    options={STAGES.map(s => ({ id: s.id, label: s.label, color: s.color, bg: s.bg, text: s.text }))}
+                    selected={stageFilters} onChange={setStageFilters}
+                  />
+                  <MultiSelectPicker
+                    label="كل المجالات"
+                    options={interests.map(i => ({ id: String(i.id), label: i.name, color: "#6B7FD4", bg: "#EEEDFE", text: "#3C3489" }))}
+                    selected={interestFilters} onChange={setInterestFilters}
+                    activeColor="#6B7FD4" activeBg="#EEEDFE" activeText="#3C3489"
+                  />
+                  <MultiSelectPicker
+                    label="كل التنبيهات"
+                    options={ALERT_OPTIONS}
+                    selected={alertFilters} onChange={setAlertFilters}
+                    activeColor="#D97706" activeBg="#FEF3C7" activeText="#92400E"
+                  />
+                  {/* Duplicate toggle */}
+                  <button onClick={() => setShowDupes(v => !v)}
+                    style={{ height: 36, padding: "0 12px", fontSize: 13, border: "1px solid #ddd", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontWeight: showDupes ? 700 : 400, background: showDupes ? "#FEE2E2" : "#fafafa", color: showDupes ? "#DC2626" : "#444" }}>
+                    🔁 {showDupes ? `أرقام مكررة (${dupPhones.size})` : "كشف المكرر"}
+                  </button>
+                  {hasFilters && (
+                    <button style={{ ...S.btnSecondary, height: 36, padding: "0 14px" }}
+                      onClick={() => { setQ(""); setStageFilters([]); setInterestFilters([]); setAlertFilters([]); setJobFilter(""); setShowDupes(false); setDateField(""); setDateFrom(""); setDateTo(""); }}>
+                      مسح الفلاتر
+                    </button>
+                  )}
+                </div>
+                {/* Row 2: job + date range */}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <input style={{ ...S.inputBase, width: 180, height: 34, fontSize: 12 }} value={jobFilter} onChange={e => setJobFilter(e.target.value)} placeholder="فلتر بالوظيفة..." />
+                  <select style={{ ...S.inputBase, width: "auto", height: 34, fontSize: 12 }} value={dateField} onChange={e => { setDateField(e.target.value); setDateFrom(""); setDateTo(""); }}>
+                    <option value="">فلتر بالتاريخ</option>
+                    <option value="created_at">تاريخ الإضافة</option>
+                    <option value="alert_date">تاريخ التنبيه</option>
+                  </select>
+                  {dateField && (
+                    <>
+                      <input type="date" style={{ ...S.inputBase, width: "auto", height: 34, fontSize: 12 }} value={dateFrom} onChange={e => setDateFrom(e.target.value)} title="من تاريخ" />
+                      <span style={{ fontSize: 12, color: "#888" }}>←</span>
+                      <input type="date" style={{ ...S.inputBase, width: "auto", height: 34, fontSize: 12 }} value={dateTo} onChange={e => setDateTo(e.target.value)} title="إلى تاريخ" />
+                    </>
+                  )}
+                </div>
               </div>
             )}
 
-            {tab === "kanban" && <KanbanView leads={filteredLeads} interests={interests} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
-            {tab === "table"  && <TableView  leads={filteredLeads} interests={interests} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} sortConfig={sortConfig} onSort={handleSort} />}
+            {tab === "kanban" && <KanbanView leads={filteredLeads} interests={interests} dupPhones={dupPhones} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
+            {tab === "table"  && <TableView  leads={filteredLeads} interests={interests} dupPhones={dupPhones} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} sortConfig={sortConfig} onSort={handleSort} />}
             {tab === "msgs"   && <MsgsView messages={messages} projects={projects} onAdd={() => setModal({ type: "add-msg" })} onEdit={m => setModal({ type: "edit-msg", data: m })} onDelete={deleteMsg} onManageProjects={() => setModal({ type: "manage-projects" })} onReorder={reorderMsgs} />}
           </>
         )}
