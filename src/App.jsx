@@ -2,16 +2,20 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "./supabase.js";
 
 const STAGES = [
-  { id: "lead",          label: "Lead",          color: "#6B7FD4", bg: "#EEEDFE", text: "#3C3489" },
-  { id: "qualification", label: "Qualification", color: "#1D9E75", bg: "#E1F5EE", text: "#085041" },
-  { id: "demo",          label: "Demo",          color: "#185FA5", bg: "#E6F1FB", text: "#0C447C" },
-  { id: "needs",         label: "Needs Analysis",color: "#BA7517", bg: "#FAEEDA", text: "#633806" },
-  { id: "proposal",      label: "Proposal",      color: "#D4537E", bg: "#FBEAF0", text: "#72243E" },
-  { id: "negotiation",   label: "Negotiation",   color: "#D85A30", bg: "#FAECE7", text: "#4A1B0C" },
-  { id: "closing",       label: "Closing",       color: "#3B6D11", bg: "#EAF3DE", text: "#173404" },
+  { id: "lead",            label: "Lead",            color: "#6B7FD4", bg: "#EEEDFE", text: "#3C3489" },
+  { id: "qualification",   label: "Qualification",   color: "#1D9E75", bg: "#E1F5EE", text: "#085041" },
+  { id: "demo",            label: "Demo",            color: "#185FA5", bg: "#E6F1FB", text: "#0C447C" },
+  { id: "needs",           label: "Needs Analysis",  color: "#BA7517", bg: "#FAEEDA", text: "#633806" },
+  { id: "proposal",        label: "Proposal",        color: "#D4537E", bg: "#FBEAF0", text: "#72243E" },
+  { id: "negotiation",     label: "Negotiation",     color: "#D85A30", bg: "#FAECE7", text: "#4A1B0C" },
+  { id: "closing",         label: "Closing",         color: "#3B6D11", bg: "#EAF3DE", text: "#173404" },
+  { id: "no_current_need", label: "No Current Need", color: "#9CA3AF", bg: "#F3F4F6", text: "#374151", hidden: true },
 ];
 
 const PROJECT_COLORS = ["#D4537E","#1D9E75","#BA7517","#185FA5","#6B7FD4","#D85A30","#3B6D11","#8B5CF6","#0891B2","#DC2626"];
+
+// مراحل مرئية افتراضياً (بدون No Current Need)
+const VISIBLE_STAGES = STAGES.filter(s => !s.hidden);
 
 function stageInfo(id) { return STAGES.find(s => s.id === id) || STAGES[0]; }
 
@@ -294,7 +298,14 @@ function LeadModal({ lead, messages, projects, interests, onSave, onClose, loadi
       </Field>
       {isEdit && (
         <Field label="المرحلة">
-          <select style={S.inputBase} value={form.stage} onChange={set("stage")}>{STAGES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}</select>
+          <select style={S.inputBase} value={form.stage} onChange={set("stage")}>
+            {STAGES.map(s => <option key={s.id} value={s.id}>{s.label}{s.hidden ? " ◉" : ""}</option>)}
+          </select>
+          {form.stage === "no_current_need" && (
+            <div style={{ marginTop: 6, fontSize: 11, color: "#6B7280", background: "#F3F4F6", border: "1px solid #e5e7eb", borderRadius: 7, padding: "6px 10px" }}>
+              ⚠️ هذا العميل لن يظهر في العرض الافتراضي — يظهر فقط عند تحديده من فلتر المراحل
+            </div>
+          )}
         </Field>
       )}
       <Field label="تعليق"><textarea style={{ ...S.inputBase, height: 60, resize: "vertical" }} value={form.comment} onChange={set("comment")} placeholder="اختياري" /></Field>
@@ -468,16 +479,24 @@ function HistoryModal({ lead, history, onClose }) {
   );
 }
 
-function KanbanView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHistory }) {
+function KanbanView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHistory, stageFilters }) {
+  // الـ Kanban يعرض المراحل العادية دايماً + No Current Need لو اتحددت في الفلتر
+  const visibleStages = stageFilters.includes("no_current_need")
+    ? STAGES
+    : VISIBLE_STAGES;
   return (
     <div style={{ overflowX: "auto", paddingBottom: 8 }}>
       <div style={{ display: "flex", gap: 10, minWidth: 1000 }}>
-        {STAGES.map(s => {
+        {visibleStages.map(s => {
           const cards = [...leads.filter(l => l.stage === s.id)].sort(sortByAlert);
           return (
-            <div key={s.id} style={{ flex: "0 0 142px", background: "#f8f8f8", border: "1px solid #eee", borderRadius: 12, padding: 10 }}>
+            <div key={s.id} style={{ flex: "0 0 142px", background: s.hidden ? "#f9fafb" : "#f8f8f8", border: `1px solid ${s.hidden ? "#e5e7eb" : "#eee"}`, borderRadius: 12, padding: 10, opacity: s.hidden ? 0.85 : 1 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: s.color, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                {s.label} <span style={{ fontSize: 10, background: s.bg, color: s.text, padding: "1px 7px", borderRadius: 10, fontWeight: 700 }}>{cards.length}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  {s.label}
+                  {s.hidden && <span style={{ fontSize: 9, background: "#e5e7eb", color: "#6B7280", padding: "1px 5px", borderRadius: 4 }}>مخفية</span>}
+                </span>
+                <span style={{ fontSize: 10, background: s.bg, color: s.text, padding: "1px 7px", borderRadius: 10, fontWeight: 700 }}>{cards.length}</span>
               </div>
               {cards.map(l => (
                 <div key={l.id} onClick={() => onEdit(l)} style={{ background: "#fff", border: "1px solid #e8e8e8", borderRadius: 9, padding: "8px 9px", marginBottom: 8, cursor: "pointer" }}
@@ -922,8 +941,9 @@ function MsgsView({ messages, projects, onAdd, onEdit, onDelete, onManageProject
 }
 
 // ── Stats (filtered) ───────────────────────────────────────────────
-function StatsBar({ leads, messages }) {
+function StatsBar({ leads, messages, allLeads }) {
   const today = todayStr();
+  const hiddenCount = allLeads.filter(l => l.stage === "no_current_need").length;
   const stats = [
     { label: "إجمالي Leads",   val: leads.length,                                    color: "#4F5BD5" },
     { label: "Closing",         val: leads.filter(l => l.stage === "closing").length, color: "#3B6D11" },
@@ -938,6 +958,12 @@ function StatsBar({ leads, messages }) {
           <div style={{ fontSize: 26, fontWeight: 800, color: s.color }}>{s.val}</div>
         </div>
       ))}
+      {hiddenCount > 0 && (
+        <div style={{ ...S.card, padding: "12px 16px", border: "1px dashed #d1d5db" }}>
+          <div style={{ fontSize: 12, color: "#9CA3AF", marginBottom: 4 }}>No Current Need</div>
+          <div style={{ fontSize: 26, fontWeight: 800, color: "#9CA3AF" }}>{hiddenCount}</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1008,7 +1034,12 @@ export default function App() {
     return leads.filter(l => {
       const text = `${l.nickname || ""} ${l.name || ""} ${l.phone || ""} ${l.job || ""}`;
       if (q && !text.includes(q)) return false;
-      if (stageFilters.length > 0 && !stageFilters.includes(l.stage)) return false;
+      if (stageFilters.length > 0) {
+        if (!stageFilters.includes(l.stage)) return false;
+      } else {
+        // بدون فلتر محدد — أخفِ No Current Need تلقائياً
+        if (l.stage === "no_current_need") return false;
+      }
       if (interestFilters.length > 0 && !interestFilters.some(id => (l.interests || []).includes(Number(id)))) return false;
       if (jobFilter && !(l.job || "").includes(jobFilter)) return false;
       if (showDupes && !dupPhones.has((l.phone || "").replace(/\s/g, ""))) return false;
@@ -1026,10 +1057,12 @@ export default function App() {
         if (!matchAlert) return false;
       }
       if (dateField && dateFrom) {
+        if (l.stage === "no_current_need" && stageFilters.length === 0) return false;
         const val = dateField === "created_at" ? (l.created_at || "").substring(0, 10) : (l.alert_date || "");
         if (!val || val < dateFrom) return false;
       }
       if (dateField && dateTo) {
+        if (l.stage === "no_current_need" && stageFilters.length === 0) return false;
         const val = dateField === "created_at" ? (l.created_at || "").substring(0, 10) : (l.alert_date || "");
         if (!val || val > dateTo) return false;
       }
@@ -1183,7 +1216,7 @@ export default function App() {
         {loading ? <Spinner /> : (
           <>
             {/* Stats now use filteredLeads */}
-            <StatsBar leads={filteredLeads} messages={messages} />
+            <StatsBar leads={filteredLeads} messages={messages} allLeads={leads} />
 
             <div style={{ display: "flex", gap: 6, marginBottom: 16, background: "#efefef", borderRadius: 10, padding: 4, width: "fit-content" }}>
               {TABS.map(t => (
@@ -1247,7 +1280,7 @@ export default function App() {
               </div>
             )}
 
-            {tab === "kanban" && <KanbanView leads={filteredLeads} interests={interests} dupPhones={dupPhones} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
+            {tab === "kanban" && <KanbanView leads={filteredLeads} interests={interests} dupPhones={dupPhones} stageFilters={stageFilters} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
             {tab === "table"  && <TableView  leads={filteredLeads} interests={interests} dupPhones={dupPhones} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} sortConfig={sortConfig} onSort={handleSort} />}
             {tab === "msgs"   && <MsgsView messages={messages} projects={projects} onAdd={() => setModal({ type: "add-msg" })} onEdit={m => setModal({ type: "edit-msg", data: m })} onDelete={deleteMsg} onManageProjects={() => setModal({ type: "manage-projects" })} onReorder={reorderMsgs} />}
             {tab === "tasks"  && <TasksView tasks={tasks} projects={projects} onAdd={() => setModal({ type: "add-task" })} onEdit={t => setModal({ type: "edit-task", data: t })} onDelete={deleteTask} />}
