@@ -619,11 +619,38 @@ function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHist
 }
 
 // ── Task Modal (Add / Edit) ────────────────────────────────────────
-function TaskModal({ task, projects, onSave, onClose, loading }) {
+// ── Task constants ─────────────────────────────────────────────────
+const TASK_STATUSES = [
+  { id: "Not Started",  label: "Not Started",  color: "#6B7FD4", bg: "#EEEDFE" },
+  { id: "In Progress",  label: "In Progress",  color: "#185FA5", bg: "#E6F1FB" },
+  { id: "Blocked",      label: "Blocked",      color: "#DC2626", bg: "#FEE2E2" },
+  { id: "Completed",    label: "Completed",    color: "#3B6D11", bg: "#EAF3DE" },
+  { id: "Cancelled",    label: "Cancelled",    color: "#9CA3AF", bg: "#F3F4F6" },
+];
+const TASK_PRIORITIES = [
+  { id: "Critical", label: "Critical", color: "#DC2626", bg: "#FEE2E2" },
+  { id: "High",     label: "High",     color: "#D85A30", bg: "#FAECE7" },
+  { id: "Medium",   label: "Medium",   color: "#BA7517", bg: "#FAEEDA" },
+  { id: "Low",      label: "Low",      color: "#3B6D11", bg: "#EAF3DE" },
+];
+function statusInfo(id)   { return TASK_STATUSES.find(s => s.id === id)   || TASK_STATUSES[0]; }
+function priorityInfo(id) { return TASK_PRIORITIES.find(p => p.id === id) || TASK_PRIORITIES[2]; }
+
+function TaskBadge({ val, items }) {
+  const info = items.find(x => x.id === val);
+  if (!info) return <span style={{ color: "#ccc" }}>—</span>;
+  return <span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 12, fontWeight: 700, background: info.bg, color: info.color, whiteSpace: "nowrap" }}>{info.label}</span>;
+}
+
+function TaskModal({ task, projects, assignees, onSave, onClose, loading }) {
   const [form, setForm] = useState({
     title:       task?.title       || "",
     project_id:  task?.project_id  ? String(task.project_id) : "",
+    assignee_id: task?.assignee_id ? String(task.assignee_id) : "",
     description: task?.description || "",
+    report:      task?.report      || "",
+    status:      task?.status      || "Not Started",
+    priority:    task?.priority    || "Medium",
     alert_note:  task?.alert_note  || "",
     alert_date:  task?.alert_date  || "",
     alert_done:  task?.alert_done  || false,
@@ -637,17 +664,40 @@ function TaskModal({ task, projects, onSave, onClose, loading }) {
 
   return (
     <Modal title={task?.id ? "تعديل المهمة" : "إضافة مهمة جديدة"} onClose={onClose}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+        <Field label="الحالة">
+          <select style={S.inputBase} value={form.status} onChange={set("status")}>
+            {TASK_STATUSES.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+        </Field>
+        <Field label="الأولوية">
+          <select style={S.inputBase} value={form.priority} onChange={set("priority")}>
+            {TASK_PRIORITIES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+        </Field>
+      </div>
       <Field label="اسم المهمة" required>
         <input style={S.inputBase} value={form.title} onChange={set("title")} placeholder="اسم المهمة..." />
       </Field>
-      <Field label="المشروع">
-        <select style={S.inputBase} value={form.project_id} onChange={set("project_id")}>
-          <option value="">بدون مشروع</option>
-          {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
-        </select>
-      </Field>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <Field label="المشروع">
+          <select style={S.inputBase} value={form.project_id} onChange={set("project_id")}>
+            <option value="">بدون مشروع</option>
+            {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+          </select>
+        </Field>
+        <Field label="المنفذ">
+          <select style={S.inputBase} value={form.assignee_id} onChange={set("assignee_id")}>
+            <option value="">غير محدد</option>
+            {assignees.map(a => <option key={a.id} value={String(a.id)}>{a.name}</option>)}
+          </select>
+        </Field>
+      </div>
       <Field label="الوصف">
-        <textarea style={{ ...S.inputBase, height: 90, resize: "vertical" }} value={form.description} onChange={set("description")} placeholder="تفاصيل المهمة..." />
+        <textarea style={{ ...S.inputBase, height: 70, resize: "vertical" }} value={form.description} onChange={set("description")} placeholder="تفاصيل المهمة..." />
+      </Field>
+      <Field label="تقرير المنفذ">
+        <textarea style={{ ...S.inputBase, height: 70, resize: "vertical" }} value={form.report} onChange={set("report")} placeholder="تقرير أو ملاحظات المنفذ..." />
       </Field>
       <Field label="تاريخ التنبيه">
         <input type="date" style={S.inputBase} value={form.alert_date} onChange={set("alert_date")} />
@@ -677,42 +727,45 @@ function TaskModal({ task, projects, onSave, onClose, loading }) {
 }
 
 // ── Tasks View ─────────────────────────────────────────────────────
-function TasksView({ tasks, projects, onAdd, onEdit, onDelete }) {
-  const [projFilter,  setProjFilter]  = useState("");
-  const [dateField,   setDateField]   = useState("");
-  const [dateFrom,    setDateFrom]    = useState("");
-  const [dateTo,      setDateTo]      = useState("");
-  const [sortKey,     setSortKey]     = useState("created_at");
-  const [sortDir,     setSortDir]     = useState("desc");
-  const [hoveredDesc, setHoveredDesc] = useState(null); // task id
+function TasksView({ tasks, projects, assignees, onAdd, onEdit, onDelete, onManageAssignees }) {
+  const [projFilter,     setProjFilter]     = useState("");
+  const [assigneeFilter, setAssigneeFilter] = useState("");
+  const [statusFilters,  setStatusFilters]  = useState([]);
+  const [priorityFilter, setPriorityFilter] = useState("");
+  const [dateField,      setDateField]      = useState("");
+  const [dateFrom,       setDateFrom]       = useState("");
+  const [dateTo,         setDateTo]         = useState("");
+  const [sortKey,        setSortKey]        = useState("created_at");
+  const [sortDir,        setSortDir]        = useState("desc");
+  const [hoveredId,      setHoveredId]      = useState(null); // for description tooltip
+  const [hoveredReport,  setHoveredReport]  = useState(null); // for report tooltip
 
   function toggleSort(k) {
     if (sortKey === k) setSortDir(d => d === "asc" ? "desc" : "asc");
     else { setSortKey(k); setSortDir("asc"); }
   }
 
-  const filtered = useMemo(() => {
-    return tasks.filter(t => {
-      if (projFilter && String(t.project_id) !== projFilter) return false;
-      if (dateField && dateFrom) {
-        const val = dateField === "created_at" ? (t.created_at || "").substring(0, 10) : (t.alert_date || "");
-        if (!val || val < dateFrom) return false;
-      }
-      if (dateField && dateTo) {
-        const val = dateField === "created_at" ? (t.created_at || "").substring(0, 10) : (t.alert_date || "");
-        if (!val || val > dateTo) return false;
-      }
-      return true;
-    });
-  }, [tasks, projFilter, dateField, dateFrom, dateTo]);
+  const filtered = useMemo(() => tasks.filter(t => {
+    if (projFilter     && String(t.project_id)  !== projFilter)     return false;
+    if (assigneeFilter && String(t.assignee_id) !== assigneeFilter) return false;
+    if (priorityFilter && t.priority !== priorityFilter)            return false;
+    if (statusFilters.length > 0 && !statusFilters.includes(t.status)) return false;
+    if (dateField && dateFrom) {
+      const val = dateField === "created_at" ? (t.created_at || "").substring(0, 10) : (t.alert_date || "");
+      if (!val || val < dateFrom) return false;
+    }
+    if (dateField && dateTo) {
+      const val = dateField === "created_at" ? (t.created_at || "").substring(0, 10) : (t.alert_date || "");
+      if (!val || val > dateTo) return false;
+    }
+    return true;
+  }), [tasks, projFilter, assigneeFilter, statusFilters, priorityFilter, dateField, dateFrom, dateTo]);
 
-  const sorted = useMemo(() => {
-    return [...filtered].sort((a, b) => {
-      const va = sortKey === "created_at" ? (a.created_at || "") : (a.alert_date || "9999");
-      const vb = sortKey === "created_at" ? (b.created_at || "") : (b.alert_date || "9999");
-      return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
-    });
-  }, [filtered, sortKey, sortDir]);
+  const sorted = useMemo(() => [...filtered].sort((a, b) => {
+    const va = sortKey === "created_at" ? (a.created_at || "") : (a.alert_date || "9999");
+    const vb = sortKey === "created_at" ? (b.created_at || "") : (b.alert_date || "9999");
+    return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+  }), [filtered, sortKey, sortDir]);
 
   function SortIcon({ k }) {
     if (sortKey !== k) return <span style={{ color: "#ccc", fontSize: 10 }}> ⇅</span>;
@@ -722,46 +775,68 @@ function TasksView({ tasks, projects, onAdd, onEdit, onDelete }) {
   const th = { padding: "8px 12px", textAlign: "right", fontSize: 12, color: "#666", fontWeight: 700, borderBottom: "2px solid #eee", cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" };
   const td = { padding: "9px 12px", fontSize: 13, color: "#1a1a1a", borderBottom: "1px solid #f0f0f0", verticalAlign: "middle" };
 
-  const hasFilters = projFilter || dateFrom || dateTo;
+  const hasFilters = projFilter || assigneeFilter || statusFilters.length > 0 || priorityFilter || dateFrom || dateTo;
+
+  function clearFilters() { setProjFilter(""); setAssigneeFilter(""); setStatusFilters([]); setPriorityFilter(""); setDateField(""); setDateFrom(""); setDateTo(""); }
 
   return (
     <div>
-      {/* Toolbar */}
-      <div style={{ display: "flex", gap: 8, justifyContent: "space-between", marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+      {/* Toolbar row 1 */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          <select style={{ ...S.inputBase, width: "auto", minWidth: 180, height: 36 }} value={projFilter} onChange={e => setProjFilter(e.target.value)}>
+          {/* Project filter */}
+          <select style={{ ...S.inputBase, width: "auto", minWidth: 160, height: 36 }} value={projFilter} onChange={e => setProjFilter(e.target.value)}>
             <option value="">كل المشروعات</option>
             {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
           </select>
-          <select style={{ ...S.inputBase, width: "auto", height: 36 }} value={dateField} onChange={e => { setDateField(e.target.value); setDateFrom(""); setDateTo(""); }}>
-            <option value="">فلتر بالتاريخ</option>
-            <option value="created_at">تاريخ الإضافة</option>
-            <option value="alert_date">تاريخ التنبيه</option>
+          {/* Assignee filter */}
+          <select style={{ ...S.inputBase, width: "auto", minWidth: 140, height: 36 }} value={assigneeFilter} onChange={e => setAssigneeFilter(e.target.value)}>
+            <option value="">كل المنفذين</option>
+            {assignees.map(a => <option key={a.id} value={String(a.id)}>{a.name}</option>)}
           </select>
-          {dateField && (
-            <>
-              <input type="date" style={{ ...S.inputBase, width: "auto", height: 36, fontSize: 12 }} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-              <span style={{ fontSize: 12, color: "#888" }}>←</span>
-              <input type="date" style={{ ...S.inputBase, width: "auto", height: 36, fontSize: 12 }} value={dateTo} onChange={e => setDateTo(e.target.value)} />
-            </>
-          )}
-          {hasFilters && (
-            <button style={{ ...S.btnSecondary, height: 36, padding: "0 12px", fontSize: 12 }}
-              onClick={() => { setProjFilter(""); setDateField(""); setDateFrom(""); setDateTo(""); }}>
-              مسح الفلاتر
-            </button>
-          )}
+          {/* Status multi-select */}
+          <MultiSelectPicker
+            label="كل الحالات"
+            options={TASK_STATUSES.map(s => ({ id: s.id, label: s.label, color: s.color, bg: s.bg, text: s.color }))}
+            selected={statusFilters} onChange={setStatusFilters}
+            activeColor="#185FA5" activeBg="#E6F1FB" activeText="#0C447C"
+          />
+          {/* Priority filter */}
+          <select style={{ ...S.inputBase, width: "auto", height: 36 }} value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)}>
+            <option value="">كل الأولويات</option>
+            {TASK_PRIORITIES.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+          {hasFilters && <button style={{ ...S.btnSecondary, height: 36, padding: "0 12px", fontSize: 12 }} onClick={clearFilters}>مسح الفلاتر</button>}
+          <button style={{ ...S.btnSecondary, height: 36, padding: "0 12px", fontSize: 12 }} onClick={onManageAssignees}>إدارة المنفذين</button>
         </div>
         <button style={S.btnPrimary} onClick={onAdd}>+ مهمة جديدة</button>
+      </div>
+      {/* Toolbar row 2 — date filter */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <select style={{ ...S.inputBase, width: "auto", height: 34, fontSize: 12 }} value={dateField} onChange={e => { setDateField(e.target.value); setDateFrom(""); setDateTo(""); }}>
+          <option value="">فلتر بالتاريخ</option>
+          <option value="created_at">تاريخ الإضافة</option>
+          <option value="alert_date">تاريخ التنبيه</option>
+        </select>
+        {dateField && (
+          <>
+            <input type="date" style={{ ...S.inputBase, width: "auto", height: 34, fontSize: 12 }} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+            <span style={{ fontSize: 12, color: "#888" }}>←</span>
+            <input type="date" style={{ ...S.inputBase, width: "auto", height: 34, fontSize: 12 }} value={dateTo} onChange={e => setDateTo(e.target.value)} />
+          </>
+        )}
       </div>
 
       {/* Table */}
       <div style={{ overflowX: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 650 }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
           <thead>
             <tr>
               <th style={th} onClick={() => toggleSort("title")}>اسم المهمة</th>
+              <th style={{ ...th, cursor: "default" }}>الحالة</th>
+              <th style={{ ...th, cursor: "default" }}>الأولوية</th>
               <th style={{ ...th, cursor: "default" }}>المشروع</th>
+              <th style={{ ...th, cursor: "default" }}>المنفذ</th>
               <th style={th} onClick={() => toggleSort("created_at")}>تاريخ الإضافة<SortIcon k="created_at" /></th>
               <th style={th} onClick={() => toggleSort("alert_date")}>تاريخ التنبيه<SortIcon k="alert_date" /></th>
               <th style={{ ...th, cursor: "default" }}>إجراءات</th>
@@ -769,47 +844,62 @@ function TasksView({ tasks, projects, onAdd, onEdit, onDelete }) {
           </thead>
           <tbody>
             {sorted.length === 0 && (
-              <tr><td colSpan={5} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد مهام — اضغط "+ مهمة جديدة"</td></tr>
+              <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد مهام — اضغط "+ مهمة جديدة"</td></tr>
             )}
             {sorted.map(t => {
-              const proj = projects.find(p => p.id === t.project_id);
+              const proj     = projects.find(p => p.id === t.project_id);
+              const assignee = assignees.find(a => a.id === t.assignee_id);
               return (
                 <tr key={t.id}
                   onMouseEnter={e => e.currentTarget.style.background = "#fafafa"}
                   onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                  {/* Task name with tooltip on description */}
-                  <td style={{ ...td, fontWeight: 700, maxWidth: 280 }}>
-                    <span ref={null} style={{ position: "relative", display: "inline-block" }}
-                      onMouseEnter={() => t.description && setHoveredDesc(t.id)}
-                      onMouseLeave={() => setHoveredDesc(null)}>
-                      <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
-                        {t.title}
-                        {t.description && <span style={{ fontSize: 10, color: "#bbb" }}>●</span>}
+
+                  {/* Task name + description tooltip + report tooltip */}
+                  <td style={{ ...td, fontWeight: 700, maxWidth: 260 }}>
+                    <span style={{ position: "relative", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                      {/* description tooltip */}
+                      <span style={{ position: "relative", display: "inline-block" }}
+                        onMouseEnter={() => t.description && setHoveredId(t.id)}
+                        onMouseLeave={() => setHoveredId(null)}>
+                        <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                          {t.title}
+                          {t.description && <span style={{ fontSize: 10, color: "#bbb" }}>●</span>}
+                        </span>
+                        {hoveredId === t.id && t.description && (
+                          <span style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 50, background: "#1a1a1a", color: "#fff", fontSize: 11, lineHeight: 1.6, padding: "8px 12px", borderRadius: 8, width: 240, whiteSpace: "pre-wrap", boxShadow: "0 4px 12px rgba(0,0,0,.25)", fontWeight: 400 }}>
+                            {t.description}
+                            <span style={{ position: "absolute", bottom: "100%", right: 10, width: 0, height: 0, borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderBottom: "5px solid #1a1a1a" }} />
+                          </span>
+                        )}
                       </span>
-                      {hoveredDesc === t.id && t.description && (
-                        <span style={{
-                          position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 50,
-                          background: "#1a1a1a", color: "#fff", fontSize: 11, lineHeight: 1.6,
-                          padding: "8px 12px", borderRadius: 8, width: 240, whiteSpace: "pre-wrap",
-                          boxShadow: "0 4px 12px rgba(0,0,0,.25)", fontWeight: 400,
-                        }}>
-                          {t.description}
-                          <span style={{ position: "absolute", bottom: "100%", right: 10, width: 0, height: 0, borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderBottom: "5px solid #1a1a1a" }} />
+                      {/* report tooltip */}
+                      {t.report && (
+                        <span style={{ position: "relative", display: "inline-block" }}
+                          onMouseEnter={() => setHoveredReport(t.id)}
+                          onMouseLeave={() => setHoveredReport(null)}>
+                          <span style={{ fontSize: 10, background: "#E6F1FB", color: "#185FA5", padding: "1px 6px", borderRadius: 6, fontWeight: 600, cursor: "default" }}>تقرير</span>
+                          {hoveredReport === t.id && (
+                            <span style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 50, background: "#185FA5", color: "#fff", fontSize: 11, lineHeight: 1.6, padding: "8px 12px", borderRadius: 8, width: 260, whiteSpace: "pre-wrap", boxShadow: "0 4px 12px rgba(0,0,0,.25)", fontWeight: 400 }}>
+                              {t.report}
+                              <span style={{ position: "absolute", bottom: "100%", right: 10, width: 0, height: 0, borderLeft: "5px solid transparent", borderRight: "5px solid transparent", borderBottom: "5px solid #185FA5" }} />
+                            </span>
+                          )}
                         </span>
                       )}
                     </span>
                   </td>
+
+                  <td style={td}><TaskBadge val={t.status}   items={TASK_STATUSES}   /></td>
+                  <td style={td}><TaskBadge val={t.priority} items={TASK_PRIORITIES} /></td>
                   <td style={td}>
-                    {proj
-                      ? <span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 12, fontWeight: 700, background: projBg(proj), color: projColor(proj) }}>{proj.name}</span>
-                      : <span style={{ color: "#ccc" }}>—</span>}
+                    {proj ? <span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 12, fontWeight: 700, background: projBg(proj), color: projColor(proj) }}>{proj.name}</span>
+                          : <span style={{ color: "#ccc" }}>—</span>}
                   </td>
+                  <td style={{ ...td, fontSize: 12, color: "#555" }}>{assignee?.name || <span style={{ color: "#ccc" }}>—</span>}</td>
                   <td style={{ ...td, fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
                     {t.created_at ? new Date(t.created_at).toLocaleDateString("ar-EG", { day: "numeric", month: "short", year: "numeric" }) : "—"}
                   </td>
-                  <td style={td}>
-                    <AlertBadge date={t.alert_date} note={t.alert_note} done={t.alert_done} />
-                  </td>
+                  <td style={td}><AlertBadge date={t.alert_date} note={t.alert_note} done={t.alert_done} /></td>
                   <td style={td}>
                     <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                       <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => onEdit(t)}>تعديل</button>
@@ -976,6 +1066,7 @@ export default function App() {
   const [interests, setInterests] = useState([]);
   const [projects, setProjects] = useState([]);
   const [tasks, setTasks] = useState([]);
+  const [assignees, setAssignees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
@@ -1002,16 +1093,18 @@ export default function App() {
   useEffect(() => {
     async function fetchAll() {
       setLoading(true);
-      const [l, m, h, i, p, t] = await Promise.all([
+      const [l, m, h, i, p, t, a] = await Promise.all([
         supabase.from("leads").select("*").order("created_at", { ascending: false }),
         supabase.from("messages").select("*").order("sort_order", { ascending: true }),
         supabase.from("lead_history").select("*").order("created_at", { ascending: true }),
         supabase.from("interests").select("*").order("name"),
         supabase.from("projects").select("*").order("name"),
         supabase.from("tasks").select("*").order("created_at", { ascending: false }),
+        supabase.from("assignees").select("*").order("name"),
       ]);
       setLeads(l.data || []); setMessages(m.data || []); setHistory(h.data || []);
       setInterests(i.data || []); setProjects(p.data || []); setTasks(t.data || []);
+      setAssignees(a.data || []);
       setLoading(false);
     }
     fetchAll();
@@ -1146,8 +1239,12 @@ export default function App() {
     const editing = modal?.data;
     const payload = {
       title:       form.title,
-      project_id:  form.project_id ? Number(form.project_id) : null,
+      project_id:  form.project_id  ? Number(form.project_id)  : null,
+      assignee_id: form.assignee_id ? Number(form.assignee_id) : null,
       description: form.description || null,
+      report:      form.report      || null,
+      status:      form.status      || "Not Started",
+      priority:    form.priority    || "Medium",
       alert_note:  form.alert_note  || null,
       alert_date:  form.alert_date  || null,
       alert_done:  !!form.alert_done,
@@ -1167,6 +1264,21 @@ export default function App() {
   const deleteTask = useCallback(async (id) => {
     await supabase.from("tasks").delete().eq("id", id);
     setTasks(prev => prev.filter(t => t.id !== id));
+    showToast("تم الحذف");
+  }, [showToast]);
+
+  const addAssignee = useCallback(async (name) => {
+    setSaving(true);
+    const { data, error } = await supabase.from("assignees").insert({ name }).select().single();
+    setSaving(false);
+    if (error) { showToast("موجود أو خطأ", "error"); return; }
+    setAssignees(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name, "ar")));
+    showToast("تمت الإضافة ✓");
+  }, [showToast]);
+
+  const deleteAssignee = useCallback(async (id) => {
+    await supabase.from("assignees").delete().eq("id", id);
+    setAssignees(prev => prev.filter(a => a.id !== id));
     showToast("تم الحذف");
   }, [showToast]);
 
@@ -1283,7 +1395,7 @@ export default function App() {
             {tab === "kanban" && <KanbanView leads={filteredLeads} interests={interests} dupPhones={dupPhones} stageFilters={stageFilters} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
             {tab === "table"  && <TableView  leads={filteredLeads} interests={interests} dupPhones={dupPhones} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} sortConfig={sortConfig} onSort={handleSort} />}
             {tab === "msgs"   && <MsgsView messages={messages} projects={projects} onAdd={() => setModal({ type: "add-msg" })} onEdit={m => setModal({ type: "edit-msg", data: m })} onDelete={deleteMsg} onManageProjects={() => setModal({ type: "manage-projects" })} onReorder={reorderMsgs} />}
-            {tab === "tasks"  && <TasksView tasks={tasks} projects={projects} onAdd={() => setModal({ type: "add-task" })} onEdit={t => setModal({ type: "edit-task", data: t })} onDelete={deleteTask} />}
+            {tab === "tasks"  && <TasksView tasks={tasks} projects={projects} assignees={assignees} onAdd={() => setModal({ type: "add-task" })} onEdit={t => setModal({ type: "edit-task", data: t })} onDelete={deleteTask} onManageAssignees={() => setModal({ type: "manage-assignees" })} />}
           </>
         )}
       </div>
@@ -1300,7 +1412,11 @@ export default function App() {
       )}
       {modal?.type === "history" && <HistoryModal lead={modal.data} history={leadHistory} onClose={() => setModal(null)} />}
       {(modal?.type === "add-task" || modal?.type === "edit-task") && (
-        <TaskModal task={modal.data} projects={projects} onSave={saveTask} onClose={() => setModal(null)} loading={saving} />
+        <TaskModal task={modal.data} projects={projects} assignees={assignees} onSave={saveTask} onClose={() => setModal(null)} loading={saving} />
+      )}
+      {modal?.type === "manage-assignees" && (
+        <ManageListModal title="إدارة المنفذين" items={assignees} saving={saving}
+          onAdd={addAssignee} onDelete={deleteAssignee} onClose={() => setModal(null)} />
       )}
       {modal?.type === "manage-interests" && (
         <ManageListModal title="إدارة مجالات الاهتمام" items={interests} saving={saving}
