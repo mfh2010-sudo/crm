@@ -543,6 +543,10 @@ function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHist
       const da = a.created_at || ""; const db = b.created_at || "";
       return sortConfig.dir === "asc" ? da.localeCompare(db) : db.localeCompare(da);
     });
+    if (sortConfig.key === "updated_at") return arr.sort((a, b) => {
+      const da = a.updated_at || a.created_at || ""; const db = b.updated_at || b.created_at || "";
+      return sortConfig.dir === "asc" ? da.localeCompare(db) : db.localeCompare(da);
+    });
     if (sortConfig.key === "name") return arr.sort((a, b) => {
       const na = a.name || a.nickname || ""; const nb = b.name || b.nickname || "";
       return na.localeCompare(nb, "ar") * (sortConfig.dir === "asc" ? 1 : -1);
@@ -574,10 +578,11 @@ function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHist
           <th style={th} onClick={() => onSort("stage")}>المرحلة<SortIcon k="stage" /></th>
           <th style={th} onClick={() => onSort("alert_date")}>تنبيه<SortIcon k="alert_date" /></th>
           <th style={th} onClick={() => onSort("created_at")}>تاريخ الإضافة<SortIcon k="created_at" /></th>
+          <th style={th} onClick={() => onSort("updated_at")}>آخر تعديل<SortIcon k="updated_at" /></th>
           <th style={{ ...th, cursor: "default" }}>إجراءات</th>
         </tr></thead>
         <tbody>
-          {sorted.length === 0 && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد نتائج</td></tr>}
+          {sorted.length === 0 && <tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد نتائج</td></tr>}
           {sorted.map(l => { const si = stageInfo(l.stage); return (
             <tr key={l.id} onMouseEnter={e => e.currentTarget.style.background = "#fafafa"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
               <td style={{ ...td, fontWeight: 700 }}>{l.name || l.nickname || "—"}</td>
@@ -600,6 +605,11 @@ function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHist
               <td style={td}><AlertBadge date={l.alert_date} note={l.alert_note} done={l.alert_done} /></td>
               <td style={{ ...td, fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
                 {l.created_at ? new Date(l.created_at).toLocaleDateString("ar-EG", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+              </td>
+              <td style={{ ...td, fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
+                {l.updated_at && l.updated_at !== l.created_at
+                  ? new Date(l.updated_at).toLocaleDateString("ar-EG", { day: "numeric", month: "short", year: "numeric" })
+                  : "—"}
               </td>
               <td style={td}>
                 <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
@@ -751,19 +761,27 @@ function TasksView({ tasks, projects, assignees, onAdd, onEdit, onDelete, onMana
     if (priorityFilter && t.priority !== priorityFilter)            return false;
     if (statusFilters.length > 0 && !statusFilters.includes(t.status)) return false;
     if (dateField && dateFrom) {
-      const val = dateField === "created_at" ? (t.created_at || "").substring(0, 10) : (t.alert_date || "");
+      const val = dateField === "created_at" ? (t.created_at || "").substring(0, 10)
+                : dateField === "updated_at"  ? (t.updated_at  || t.created_at || "").substring(0, 10)
+                :                               (t.alert_date   || "");
       if (!val || val < dateFrom) return false;
     }
     if (dateField && dateTo) {
-      const val = dateField === "created_at" ? (t.created_at || "").substring(0, 10) : (t.alert_date || "");
+      const val = dateField === "created_at" ? (t.created_at || "").substring(0, 10)
+                : dateField === "updated_at"  ? (t.updated_at  || t.created_at || "").substring(0, 10)
+                :                               (t.alert_date   || "");
       if (!val || val > dateTo) return false;
     }
     return true;
   }), [tasks, projFilter, assigneeFilter, statusFilters, priorityFilter, dateField, dateFrom, dateTo]);
 
   const sorted = useMemo(() => [...filtered].sort((a, b) => {
-    const va = sortKey === "created_at" ? (a.created_at || "") : (a.alert_date || "9999");
-    const vb = sortKey === "created_at" ? (b.created_at || "") : (b.alert_date || "9999");
+    const va = sortKey === "created_at" ? (a.created_at || "")
+             : sortKey === "updated_at" ? (a.updated_at || a.created_at || "")
+             : (a.alert_date || "9999");
+    const vb = sortKey === "created_at" ? (b.created_at || "")
+             : sortKey === "updated_at" ? (b.updated_at || b.created_at || "")
+             : (b.alert_date || "9999");
     return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
   }), [filtered, sortKey, sortDir]);
 
@@ -816,6 +834,7 @@ function TasksView({ tasks, projects, assignees, onAdd, onEdit, onDelete, onMana
         <select style={{ ...S.inputBase, width: "auto", height: 34, fontSize: 12 }} value={dateField} onChange={e => { setDateField(e.target.value); setDateFrom(""); setDateTo(""); }}>
           <option value="">فلتر بالتاريخ</option>
           <option value="created_at">تاريخ الإضافة</option>
+          <option value="updated_at">تاريخ آخر تعديل</option>
           <option value="alert_date">تاريخ التنبيه</option>
         </select>
         {dateField && (
@@ -838,13 +857,14 @@ function TasksView({ tasks, projects, assignees, onAdd, onEdit, onDelete, onMana
               <th style={{ ...th, cursor: "default" }}>المشروع</th>
               <th style={{ ...th, cursor: "default" }}>المنفذ</th>
               <th style={th} onClick={() => toggleSort("created_at")}>تاريخ الإضافة<SortIcon k="created_at" /></th>
+              <th style={th} onClick={() => toggleSort("updated_at")}>آخر تعديل<SortIcon k="updated_at" /></th>
               <th style={th} onClick={() => toggleSort("alert_date")}>تاريخ التنبيه<SortIcon k="alert_date" /></th>
               <th style={{ ...th, cursor: "default" }}>إجراءات</th>
             </tr>
           </thead>
           <tbody>
             {sorted.length === 0 && (
-              <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد مهام — اضغط "+ مهمة جديدة"</td></tr>
+              <tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد مهام — اضغط "+ مهمة جديدة"</td></tr>
             )}
             {sorted.map(t => {
               const proj     = projects.find(p => p.id === t.project_id);
@@ -898,6 +918,11 @@ function TasksView({ tasks, projects, assignees, onAdd, onEdit, onDelete, onMana
                   <td style={{ ...td, fontSize: 12, color: "#555" }}>{assignee?.name || <span style={{ color: "#ccc" }}>—</span>}</td>
                   <td style={{ ...td, fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
                     {t.created_at ? new Date(t.created_at).toLocaleDateString("ar-EG", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                  </td>
+                  <td style={{ ...td, fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
+                    {t.updated_at && t.updated_at !== t.created_at
+                      ? new Date(t.updated_at).toLocaleDateString("ar-EG", { day: "numeric", month: "short", year: "numeric" })
+                      : "—"}
                   </td>
                   <td style={td}><AlertBadge date={t.alert_date} note={t.alert_note} done={t.alert_done} /></td>
                   <td style={td}>
@@ -1151,12 +1176,16 @@ export default function App() {
       }
       if (dateField && dateFrom) {
         if (l.stage === "no_current_need" && stageFilters.length === 0) return false;
-        const val = dateField === "created_at" ? (l.created_at || "").substring(0, 10) : (l.alert_date || "");
+        const val = dateField === "created_at"  ? (l.created_at  || "").substring(0, 10)
+                  : dateField === "updated_at"  ? (l.updated_at  || "").substring(0, 10)
+                  :                               (l.alert_date   || "");
         if (!val || val < dateFrom) return false;
       }
       if (dateField && dateTo) {
         if (l.stage === "no_current_need" && stageFilters.length === 0) return false;
-        const val = dateField === "created_at" ? (l.created_at || "").substring(0, 10) : (l.alert_date || "");
+        const val = dateField === "created_at"  ? (l.created_at  || "").substring(0, 10)
+                  : dateField === "updated_at"  ? (l.updated_at  || "").substring(0, 10)
+                  :                               (l.alert_date   || "");
         if (!val || val > dateTo) return false;
       }
       return true;
@@ -1379,6 +1408,7 @@ export default function App() {
                   <select style={{ ...S.inputBase, width: "auto", height: 34, fontSize: 12 }} value={dateField} onChange={e => { setDateField(e.target.value); setDateFrom(""); setDateTo(""); }}>
                     <option value="">فلتر بالتاريخ</option>
                     <option value="created_at">تاريخ الإضافة</option>
+                    <option value="updated_at">تاريخ آخر تعديل</option>
                     <option value="alert_date">تاريخ التنبيه</option>
                   </select>
                   {dateField && (
