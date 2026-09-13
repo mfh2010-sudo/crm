@@ -4,9 +4,8 @@ import { supabase } from "./supabase.js";
 const STAGES = [
   { id: "lead",            label: "Lead",            color: "#6B7FD4", bg: "#EEEDFE", text: "#3C3489" },
   { id: "qualification",   label: "Qualification",   color: "#1D9E75", bg: "#E1F5EE", text: "#085041" },
-  { id: "demo",            label: "Demo",            color: "#185FA5", bg: "#E6F1FB", text: "#0C447C" },
-  { id: "needs",           label: "Needs Analysis",  color: "#BA7517", bg: "#FAEEDA", text: "#633806" },
-  { id: "proposal",        label: "Proposal",        color: "#D4537E", bg: "#FBEAF0", text: "#72243E" },
+  { id: "send_demo",       label: "Send Demo",       color: "#185FA5", bg: "#E6F1FB", text: "#0C447C" },
+  { id: "meeting",         label: "Meeting",         color: "#BA7517", bg: "#FAEEDA", text: "#633806" },
   { id: "negotiation",     label: "Negotiation",     color: "#D85A30", bg: "#FAECE7", text: "#4A1B0C" },
   { id: "closing",         label: "Closing",         color: "#3B6D11", bg: "#EAF3DE", text: "#173404" },
   { id: "no_current_need", label: "No Current Need", color: "#9CA3AF", bg: "#F3F4F6", text: "#374151", hidden: true },
@@ -48,11 +47,15 @@ function buildMessage(body, lead) {
   return `${greeting}\n\n${cleaned}`;
 }
 
-function sendWA(phone, body, lead) {
+function sendWA(phone, body, lead, onStageAdvance) {
   const text = buildMessage(body, lead);
   const clean = (phone || "").replace(/[^\d+]/g, "");
   const num = clean.startsWith("0") ? "2" + clean.substring(1) : clean;
   window.open(`https://wa.me/${num}?text=${encodeURIComponent(text)}`, "_blank");
+  // تحويل تلقائي لـ Send Demo لو المرحلة الحالية Lead أو Qualification
+  if (onStageAdvance && (lead?.stage === "lead" || lead?.stage === "qualification")) {
+    onStageAdvance(lead.id, "send_demo");
+  }
 }
 
 function projColor(proj) {
@@ -266,13 +269,32 @@ const ALERT_OPTIONS = [
 ];
 
 // ── Lead Modal ─────────────────────────────────────────────────────
-function LeadModal({ lead, messages, projects, interests, onSave, onClose, loading, onManageInterests }) {
+function LeadModal({ lead, messages, projects, interests, onSave, onClose, loading, onManageInterests, onStageAdvance }) {
   const isEdit = !!lead?.id;
+
+  // تاريخ تنبيه تلقائي بعد أسبوع من اليوم للـ leads الجدد
+  const defaultAlertDate = (() => {
+    if (isEdit) return lead?.alert_date || "";
+    const d = new Date(); d.setDate(d.getDate() + 7);
+    return d.toISOString().split("T")[0];
+  })();
+
   const [form, setForm] = useState({
-    nickname: lead?.nickname || "", phone: lead?.phone || "", name: lead?.name || "",
-    job: lead?.job || "", stage: lead?.stage || "lead", comment: lead?.comment || "",
-    alert_date: lead?.alert_date || "", alert_note: lead?.alert_note || "",
-    alert_done: lead?.alert_done || false, interests: lead?.interests || [],
+    nickname:  lead?.nickname  || "",
+    phone:     lead?.phone     || "",
+    name:      lead?.name      || "",
+    job:       lead?.job       || "",
+    company:   lead?.company   || "",
+    region:    lead?.region    || "",
+    address:   lead?.address   || "",
+    followup1: lead?.followup1 || "",
+    followup2: lead?.followup2 || "",
+    stage:     lead?.stage     || "lead",
+    comment:   lead?.comment   || "",
+    alert_date: defaultAlertDate,
+    alert_note: lead?.alert_note || "",
+    alert_done: lead?.alert_done || false,
+    interests:  lead?.interests  || [],
   });
   const [selectedMsg, setSelectedMsg] = useState(() => !isEdit ? (messages.find(m => m.tag === "Lead") || messages[0] || null) : null);
   const [showPicker, setShowPicker] = useState(!isEdit);
@@ -289,10 +311,20 @@ function LeadModal({ lead, messages, projects, interests, onSave, onClose, loadi
 
   return (
     <Modal title={isEdit ? "تعديل العميل" : "إضافة Lead جديد"} onClose={onClose}>
+      {/* ── بيانات أساسية ── */}
       <Field label="اسم الشهرة" required><input style={S.inputBase} value={form.nickname} onChange={set("nickname")} placeholder="مثال: أ. محمد" /></Field>
       <Field label="رقم الموبايل" required><input style={S.inputBase} value={form.phone} onChange={set("phone")} placeholder="01x xxxx xxxx" /></Field>
-      <Field label="الاسم الكامل"><input style={S.inputBase} value={form.name} onChange={set("name")} placeholder="اختياري" /></Field>
-      <Field label="الوظيفة"><input style={S.inputBase} value={form.job} onChange={set("job")} placeholder="اختياري" /></Field>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <Field label="الاسم الكامل"><input style={S.inputBase} value={form.name} onChange={set("name")} placeholder="اختياري" /></Field>
+        <Field label="الوظيفة"><input style={S.inputBase} value={form.job} onChange={set("job")} placeholder="اختياري" /></Field>
+        <Field label="اسم الشركة"><input style={S.inputBase} value={form.company} onChange={set("company")} placeholder="اختياري" /></Field>
+        <Field label="المنطقة"><input style={S.inputBase} value={form.region} onChange={set("region")} placeholder="اختياري" /></Field>
+      </div>
+      <Field label="العنوان"><input style={S.inputBase} value={form.address} onChange={set("address")} placeholder="اختياري" /></Field>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <Field label="متابعة 1"><input style={S.inputBase} value={form.followup1} onChange={set("followup1")} placeholder="ملاحظة متابعة" /></Field>
+        <Field label="متابعة 2"><input style={S.inputBase} value={form.followup2} onChange={set("followup2")} placeholder="ملاحظة متابعة" /></Field>
+      </div>
       <Field label="مجالات الاهتمام">
         <InterestPicker interests={interests} selected={form.interests} onChange={v => setForm(f => ({ ...f, interests: v }))} onManage={onManageInterests} />
       </Field>
@@ -389,7 +421,7 @@ function LeadModal({ lead, messages, projects, interests, onSave, onClose, loadi
   );
 }
 
-function SendWAModal({ lead, messages, projects, onClose }) {
+function SendWAModal({ lead, messages, projects, onClose, onStageAdvance }) {
   const [projFilter, setProjFilter] = useState("");
   const filtered = projFilter ? messages.filter(m => String(m.project_id) === projFilter) : messages;
   return (
@@ -400,7 +432,13 @@ function SendWAModal({ lead, messages, projects, onClose }) {
           {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
         </select>
       )}
+      {(lead.stage === "lead" || lead.stage === "qualification") && (
+        <div style={{ fontSize: 11, color: "#185FA5", background: "#E6F1FB", borderRadius: 8, padding: "6px 10px", marginBottom: 10 }}>
+          ℹ️ بعد الإرسال سيتحول العميل تلقائياً إلى <strong>Send Demo</strong>
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 360, overflowY: "auto" }}>
+        {filtered.length === 0 && <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "1rem" }}>لا توجد رسائل</div>}
         {filtered.map(m => {
           const proj = projects.find(p => p.id === m.project_id);
           return (
@@ -412,7 +450,10 @@ function SendWAModal({ lead, messages, projects, onClose }) {
                 </div>
                 <div style={{ fontSize: 11, color: "#777", lineHeight: 1.5 }}>{m.body.substring(0, 70)}…</div>
               </div>
-              <button style={S.btnWA} onClick={() => { sendWA(lead.phone, m.body, lead); onClose(); }}>إرسال</button>
+              <button style={S.btnWA} onClick={() => {
+                sendWA(lead.phone, m.body, lead, onStageAdvance);
+                onClose();
+              }}>إرسال</button>
             </div>
           );
         })}
@@ -1198,6 +1239,11 @@ export default function App() {
     const payload = {
       nickname: form.nickname, phone: form.phone, name: form.name || null,
       job: form.job || null, comment: form.comment || null,
+      company:   form.company   || null,
+      region:    form.region    || null,
+      address:   form.address   || null,
+      followup1: form.followup1 || null,
+      followup2: form.followup2 || null,
       alert_date: form.alert_date || null, alert_note: form.alert_note || null,
       alert_done: !!form.alert_done, interests: form.interests,
     };
@@ -1216,8 +1262,22 @@ export default function App() {
       if (error) { showToast("خطأ في الإضافة", "error"); setSaving(false); return; }
       setLeads(prev => [data, ...prev]);
       await supabase.from("lead_history").insert({ lead_id: data.id, stage: "lead", comment: form.comment });
-      if (selectedMsg) sendWA(form.phone, selectedMsg.body, form);
-      showToast("تمت الإضافة ✓");
+      if (selectedMsg) {
+        sendWA(form.phone, selectedMsg.body, { ...data, stage: "lead" }, null);
+        // تحويل تلقائي لـ Send Demo بعد إرسال أول رسالة
+        const { data: advanced } = await supabase.from("leads")
+          .update({ stage: "send_demo", updated_at: new Date().toISOString() })
+          .eq("id", data.id).select().single();
+        if (advanced) {
+          setLeads(prev => prev.map(l => l.id === advanced.id ? advanced : l));
+          await supabase.from("lead_history").insert({ lead_id: data.id, stage: "send_demo", comment: "تحويل تلقائي بعد إرسال واتساب" });
+          showToast("تمت الإضافة وتحويل لـ Send Demo ✓");
+        } else {
+          showToast("تمت الإضافة وفُتح واتساب ✓");
+        }
+      } else {
+        showToast("تمت الإضافة ✓");
+      }
     }
     setSaving(false); setModal(null);
   }, [modal, showToast]);
@@ -1253,6 +1313,19 @@ export default function App() {
     setMessages(prev => prev.filter(m => m.id !== id));
     showToast("تم الحذف");
   }, [showToast]);
+
+  const advanceStage = useCallback(async (leadId, newStage) => {
+    const lead = leads.find(l => l.id === leadId);
+    if (!lead || lead.stage === newStage) return;
+    const { data } = await supabase.from("leads")
+      .update({ stage: newStage, updated_at: new Date().toISOString() })
+      .eq("id", leadId).select().single();
+    if (data) {
+      setLeads(prev => prev.map(l => l.id === leadId ? data : l));
+      await supabase.from("lead_history").insert({ lead_id: leadId, stage: newStage, comment: "تحويل تلقائي بعد إرسال واتساب" });
+      showToast(`تم التحويل إلى ${newStage === "send_demo" ? "Send Demo" : newStage} ✓`);
+    }
+  }, [leads, showToast]);
 
   const reorderMsgs = useCallback(async (newOrder) => {
     setMessages(newOrder);
@@ -1433,9 +1506,10 @@ export default function App() {
       {(modal?.type === "add-lead" || modal?.type === "edit-lead") && (
         <LeadModal lead={modal.data} messages={messages} projects={projects} interests={interests}
           onSave={saveLead} onClose={() => setModal(null)} loading={saving}
-          onManageInterests={() => setModal({ type: "manage-interests" })} />
+          onManageInterests={() => setModal({ type: "manage-interests" })}
+          onStageAdvance={advanceStage} />
       )}
-      {modal?.type === "send-wa" && <SendWAModal lead={modal.data} messages={messages} projects={projects} onClose={() => setModal(null)} />}
+      {modal?.type === "send-wa" && <SendWAModal lead={modal.data} messages={messages} projects={projects} onClose={() => setModal(null)} onStageAdvance={advanceStage} />}
       {(modal?.type === "add-msg" || modal?.type === "edit-msg") && (
         <MsgModal msg={modal.data} projects={projects} onSave={saveMsg} onClose={() => setModal(null)} loading={saving}
           onManageProjects={() => setModal({ type: "manage-projects" })} />
