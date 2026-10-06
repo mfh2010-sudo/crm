@@ -212,6 +212,50 @@ function AlertBadge({ date, note, done }) {
   );
 }
 
+// ── Lookup select (قائمة من جدول + إضافة سريعة) ────────────────────
+function LookupSelect({ items, value, onChange, onQuickAdd, placeholder = "اختر..." }) {
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // لو القيمة الحالية مش موجودة في القائمة (بيانات قديمة) نعرضها برضه
+  const names = items.map(i => i.name);
+  const options = value && !names.includes(value) ? [value, ...names] : names;
+
+  async function submit() {
+    const v = newName.trim();
+    if (!v) return;
+    const existing = items.find(i => i.name === v);
+    if (existing) { onChange(existing.name); setAdding(false); setNewName(""); return; }
+    setBusy(true);
+    const created = await onQuickAdd(v);
+    setBusy(false);
+    if (created) { onChange(created.name); setAdding(false); setNewName(""); }
+  }
+
+  if (adding) {
+    return (
+      <div style={{ display: "flex", gap: 4 }}>
+        <input autoFocus style={{ ...S.inputBase, flex: 1 }} value={newName} onChange={e => setNewName(e.target.value)}
+          placeholder="اسم جديد..."
+          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); submit(); } if (e.key === "Escape") { setAdding(false); setNewName(""); } }} />
+        <button type="button" style={{ ...S.btnPrimary, padding: "0 10px" }} disabled={busy || !newName.trim()} onClick={submit}>{busy ? "…" : "✓"}</button>
+        <button type="button" style={{ ...S.btnSecondary, padding: "0 10px" }} onClick={() => { setAdding(false); setNewName(""); }}>×</button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", gap: 4 }}>
+      <select style={{ ...S.inputBase, flex: 1 }} value={value} onChange={e => onChange(e.target.value)}>
+        <option value="">{placeholder}</option>
+        {options.map(n => <option key={n} value={n}>{n}</option>)}
+      </select>
+      <button type="button" title="إضافة جديد" style={{ ...S.btnSecondary, padding: "0 10px", fontSize: 15, fontWeight: 700, color: "#4F5BD5" }} onClick={() => setAdding(true)}>+</button>
+    </div>
+  );
+}
+
 // ── Generic multi-select dropdown ─────────────────────────────────
 function MultiSelectPicker({ label: defaultLabel, options, selected, onChange, activeColor = "#4F5BD5", activeBg = "#EEEDFE", activeText = "#3C3489" }) {
   const [open, setOpen] = useState(false);
@@ -269,7 +313,7 @@ const ALERT_OPTIONS = [
 ];
 
 // ── Lead Modal ─────────────────────────────────────────────────────
-function LeadModal({ lead, messages, projects, interests, onSave, onClose, loading, onManageInterests, onStageAdvance }) {
+function LeadModal({ lead, messages, projects, interests, regions, jobs, onQuickAddRegion, onQuickAddJob, onSave, onClose, loading, onManageInterests, onStageAdvance }) {
   const isEdit = !!lead?.id;
 
   // تاريخ تنبيه تلقائي بعد أسبوع من اليوم للـ leads الجدد
@@ -282,6 +326,7 @@ function LeadModal({ lead, messages, projects, interests, onSave, onClose, loadi
   const [form, setForm] = useState({
     nickname:  lead?.nickname  || "",
     phone:     lead?.phone     || "",
+    email:     lead?.email     || "",
     name:      lead?.name      || "",
     job:       lead?.job       || "",
     company:   lead?.company   || "",
@@ -314,12 +359,27 @@ function LeadModal({ lead, messages, projects, interests, onSave, onClose, loadi
       {/* ── بيانات أساسية ── */}
       <Field label="اسم الشهرة" required><input style={S.inputBase} value={form.nickname} onChange={set("nickname")} placeholder="مثال: أ. محمد" /></Field>
       <Field label="رقم الموبايل" required><input style={S.inputBase} value={form.phone} onChange={set("phone")} placeholder="01x xxxx xxxx" /></Field>
+      <Field label="المرحلة">
+        <select style={S.inputBase} value={form.stage} onChange={set("stage")}>
+          {STAGES.map(s => <option key={s.id} value={s.id}>{s.label}{s.hidden ? " ◉" : ""}</option>)}
+        </select>
+        {form.stage === "no_current_need" && (
+          <div style={{ marginTop: 6, fontSize: 11, color: "#6B7280", background: "#F3F4F6", border: "1px solid #e5e7eb", borderRadius: 7, padding: "6px 10px" }}>
+            ⚠️ هذا العميل لن يظهر في العرض الافتراضي — يظهر فقط عند تحديده من فلتر المراحل
+          </div>
+        )}
+      </Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <Field label="الاسم الكامل"><input style={S.inputBase} value={form.name} onChange={set("name")} placeholder="اختياري" /></Field>
-        <Field label="الوظيفة"><input style={S.inputBase} value={form.job} onChange={set("job")} placeholder="اختياري" /></Field>
-        <Field label="اسم الشركة"><input style={S.inputBase} value={form.company} onChange={set("company")} placeholder="اختياري" /></Field>
-        <Field label="المنطقة"><input style={S.inputBase} value={form.region} onChange={set("region")} placeholder="اختياري" /></Field>
+        <Field label="البريد الإلكتروني"><input type="email" style={{ ...S.inputBase, direction: "ltr", textAlign: "right" }} value={form.email} onChange={set("email")} placeholder="name@example.com" /></Field>
+        <Field label="الوظيفة">
+          <LookupSelect items={jobs} value={form.job} onChange={v => setForm(f => ({ ...f, job: v }))} onQuickAdd={onQuickAddJob} placeholder="اختر الوظيفة" />
+        </Field>
+        <Field label="المنطقة">
+          <LookupSelect items={regions} value={form.region} onChange={v => setForm(f => ({ ...f, region: v }))} onQuickAdd={onQuickAddRegion} placeholder="اختر المنطقة" />
+        </Field>
       </div>
+      <Field label="اسم الشركة"><input style={S.inputBase} value={form.company} onChange={set("company")} placeholder="اختياري" /></Field>
       <Field label="العنوان"><input style={S.inputBase} value={form.address} onChange={set("address")} placeholder="اختياري" /></Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <Field label="متابعة 1"><input style={S.inputBase} value={form.followup1} onChange={set("followup1")} placeholder="ملاحظة متابعة" /></Field>
@@ -328,18 +388,6 @@ function LeadModal({ lead, messages, projects, interests, onSave, onClose, loadi
       <Field label="مجالات الاهتمام">
         <InterestPicker interests={interests} selected={form.interests} onChange={v => setForm(f => ({ ...f, interests: v }))} onManage={onManageInterests} />
       </Field>
-      {isEdit && (
-        <Field label="المرحلة">
-          <select style={S.inputBase} value={form.stage} onChange={set("stage")}>
-            {STAGES.map(s => <option key={s.id} value={s.id}>{s.label}{s.hidden ? " ◉" : ""}</option>)}
-          </select>
-          {form.stage === "no_current_need" && (
-            <div style={{ marginTop: 6, fontSize: 11, color: "#6B7280", background: "#F3F4F6", border: "1px solid #e5e7eb", borderRadius: 7, padding: "6px 10px" }}>
-              ⚠️ هذا العميل لن يظهر في العرض الافتراضي — يظهر فقط عند تحديده من فلتر المراحل
-            </div>
-          )}
-        </Field>
-      )}
       <Field label="تعليق"><textarea style={{ ...S.inputBase, height: 60, resize: "vertical" }} value={form.comment} onChange={set("comment")} placeholder="اختياري" /></Field>
       <Field label="تاريخ التنبيه / المتابعة">
         <input type="date" style={S.inputBase} value={form.alert_date} onChange={set("alert_date")} min={todayStr()} />
@@ -1133,6 +1181,8 @@ export default function App() {
   const [projects, setProjects] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [assignees, setAssignees] = useState([]);
+  const [regions, setRegions] = useState([]);
+  const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
@@ -1143,7 +1193,8 @@ export default function App() {
   const [stageFilters, setStageFilters] = useState([]);
   const [interestFilters, setInterestFilters] = useState([]);
   const [alertFilters, setAlertFilters] = useState([]);
-  const [jobFilter, setJobFilter] = useState("");
+  const [regionFilters, setRegionFilters] = useState([]);
+  const [jobFilters, setJobFilters] = useState([]);
   const [dateField, setDateField] = useState(""); // "created_at" | "alert_date"
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -1159,7 +1210,7 @@ export default function App() {
   useEffect(() => {
     async function fetchAll() {
       setLoading(true);
-      const [l, m, h, i, p, t, a] = await Promise.all([
+      const [l, m, h, i, p, t, a, r, j] = await Promise.all([
         supabase.from("leads").select("*").order("created_at", { ascending: false }),
         supabase.from("messages").select("*").order("sort_order", { ascending: true }),
         supabase.from("lead_history").select("*").order("created_at", { ascending: true }),
@@ -1167,10 +1218,13 @@ export default function App() {
         supabase.from("projects").select("*").order("name"),
         supabase.from("tasks").select("*").order("created_at", { ascending: false }),
         supabase.from("assignees").select("*").order("name"),
+        supabase.from("regions").select("*").order("name"),
+        supabase.from("jobs").select("*").order("name"),
       ]);
       setLeads(l.data || []); setMessages(m.data || []); setHistory(h.data || []);
       setInterests(i.data || []); setProjects(p.data || []); setTasks(t.data || []);
       setAssignees(a.data || []);
+      setRegions(r.data || []); setJobs(j.data || []);
       setLoading(false);
     }
     fetchAll();
@@ -1191,7 +1245,7 @@ export default function App() {
     const tmrw = tomorrowStr();
     const eow = endOfWeekStr();
     return leads.filter(l => {
-      const text = `${l.nickname || ""} ${l.name || ""} ${l.phone || ""} ${l.job || ""}`;
+      const text = `${l.nickname || ""} ${l.name || ""} ${l.phone || ""} ${l.job || ""} ${l.email || ""}`;
       if (q && !text.includes(q)) return false;
       if (stageFilters.length > 0) {
         if (!stageFilters.includes(l.stage)) return false;
@@ -1200,7 +1254,8 @@ export default function App() {
         if (l.stage === "no_current_need") return false;
       }
       if (interestFilters.length > 0 && !interestFilters.some(id => (l.interests || []).includes(Number(id)))) return false;
-      if (jobFilter && !(l.job || "").includes(jobFilter)) return false;
+      if (regionFilters.length > 0 && !regionFilters.includes(l.region || "")) return false;
+      if (jobFilters.length > 0 && !jobFilters.includes(l.job || "")) return false;
       if (showDupes && !dupPhones.has((l.phone || "").replace(/\s/g, ""))) return false;
       if (alertFilters.length > 0) {
         const matchAlert = alertFilters.some(f => {
@@ -1231,13 +1286,14 @@ export default function App() {
       }
       return true;
     });
-  }, [leads, q, stageFilters, interestFilters, alertFilters, jobFilter, showDupes, dupPhones, dateField, dateFrom, dateTo]);
+  }, [leads, q, stageFilters, interestFilters, alertFilters, regionFilters, jobFilters, showDupes, dupPhones, dateField, dateFrom, dateTo]);
 
   const saveLead = useCallback(async (form, selectedMsg) => {
     setSaving(true);
     const editing = modal?.data;
     const payload = {
       nickname: form.nickname, phone: form.phone, name: form.name || null,
+      email:     (form.email || "").trim() || null,
       job: form.job || null, comment: form.comment || null,
       company:   form.company   || null,
       region:    form.region    || null,
@@ -1258,19 +1314,26 @@ export default function App() {
       }
       showToast("تم الحفظ ✓");
     } else {
-      const { data, error } = await supabase.from("leads").insert({ ...payload, stage: "lead" }).select().single();
+      const initialStage = form.stage || "lead";
+      const { data, error } = await supabase.from("leads").insert({ ...payload, stage: initialStage }).select().single();
       if (error) { showToast("خطأ في الإضافة", "error"); setSaving(false); return; }
       setLeads(prev => [data, ...prev]);
-      await supabase.from("lead_history").insert({ lead_id: data.id, stage: "lead", comment: form.comment });
-      if (selectedMsg) {
-        sendWA(form.phone, selectedMsg.body, { ...data, stage: "lead" }, null);
+      const { data: h0 } = await supabase.from("lead_history").insert({ lead_id: data.id, stage: initialStage, comment: form.comment }).select().single();
+      if (h0) setHistory(prev => [...prev, h0]);
+      const canAdvance = initialStage === "lead" || initialStage === "qualification";
+      if (selectedMsg && !canAdvance) {
+        sendWA(form.phone, selectedMsg.body, data, null);
+        showToast("تمت الإضافة وفُتح واتساب ✓");
+      } else if (selectedMsg) {
+        sendWA(form.phone, selectedMsg.body, data, null);
         // تحويل تلقائي لـ Send Demo بعد إرسال أول رسالة
         const { data: advanced } = await supabase.from("leads")
           .update({ stage: "send_demo", updated_at: new Date().toISOString() })
           .eq("id", data.id).select().single();
         if (advanced) {
           setLeads(prev => prev.map(l => l.id === advanced.id ? advanced : l));
-          await supabase.from("lead_history").insert({ lead_id: data.id, stage: "send_demo", comment: "تحويل تلقائي بعد إرسال واتساب" });
+          const { data: h1 } = await supabase.from("lead_history").insert({ lead_id: data.id, stage: "send_demo", comment: "تحويل تلقائي بعد إرسال واتساب" }).select().single();
+          if (h1) setHistory(prev => [...prev, h1]);
           showToast("تمت الإضافة وتحويل لـ Send Demo ✓");
         } else {
           showToast("تمت الإضافة وفُتح واتساب ✓");
@@ -1388,9 +1451,10 @@ export default function App() {
     setSaving(true);
     const { data, error } = await supabase.from(table).insert({ name }).select().single();
     setSaving(false);
-    if (error) { showToast("موجود أو خطأ", "error"); return; }
+    if (error) { showToast("موجود أو خطأ", "error"); return null; }
     setter(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name, "ar")));
     showToast("تمت الإضافة ✓");
+    return data;
   }, [showToast]);
 
   const deleteLookup = useCallback(async (table, id, setter) => {
@@ -1411,7 +1475,7 @@ export default function App() {
     { id: "tasks",  label: "المهام" },
   ];
   const leadHistory = modal?.data?.id ? history.filter(h => h.lead_id === modal.data.id) : [];
-  const hasFilters = q || stageFilters.length > 0 || interestFilters.length > 0 || alertFilters.length > 0 || jobFilter || showDupes || dateFrom || dateTo;
+  const hasFilters = q || stageFilters.length > 0 || interestFilters.length > 0 || alertFilters.length > 0 || regionFilters.length > 0 || jobFilters.length > 0 || showDupes || dateFrom || dateTo;
 
   return (
     <div dir="rtl" style={{ fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", background: "#f5f5f7", minHeight: "100vh", paddingBottom: "2rem" }}>
@@ -1470,14 +1534,27 @@ export default function App() {
                   </button>
                   {hasFilters && (
                     <button style={{ ...S.btnSecondary, height: 36, padding: "0 14px" }}
-                      onClick={() => { setQ(""); setStageFilters([]); setInterestFilters([]); setAlertFilters([]); setJobFilter(""); setShowDupes(false); setDateField(""); setDateFrom(""); setDateTo(""); }}>
+                      onClick={() => { setQ(""); setStageFilters([]); setInterestFilters([]); setAlertFilters([]); setRegionFilters([]); setJobFilters([]); setShowDupes(false); setDateField(""); setDateFrom(""); setDateTo(""); }}>
                       مسح الفلاتر
                     </button>
                   )}
                 </div>
-                {/* Row 2: job + date range */}
+                {/* Row 2: region + job + date range */}
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <input style={{ ...S.inputBase, width: 180, height: 34, fontSize: 12 }} value={jobFilter} onChange={e => setJobFilter(e.target.value)} placeholder="فلتر بالوظيفة..." />
+                  <MultiSelectPicker
+                    label="كل المناطق"
+                    options={regions.map(r => ({ id: r.name, label: r.name, color: "#0891B2", bg: "#E0F2FE", text: "#0C4A6E" }))}
+                    selected={regionFilters} onChange={setRegionFilters}
+                    activeColor="#0891B2" activeBg="#E0F2FE" activeText="#0C4A6E"
+                  />
+                  <MultiSelectPicker
+                    label="كل الوظائف"
+                    options={jobs.map(j => ({ id: j.name, label: j.name, color: "#8B5CF6", bg: "#F3E8FF", text: "#4C1D95" }))}
+                    selected={jobFilters} onChange={setJobFilters}
+                    activeColor="#8B5CF6" activeBg="#F3E8FF" activeText="#4C1D95"
+                  />
+                  <button style={{ ...S.btnSecondary, height: 34, padding: "0 10px", fontSize: 12 }} onClick={() => setModal({ type: "manage-regions" })}>إدارة المناطق</button>
+                  <button style={{ ...S.btnSecondary, height: 34, padding: "0 10px", fontSize: 12 }} onClick={() => setModal({ type: "manage-jobs" })}>إدارة الوظائف</button>
                   <select style={{ ...S.inputBase, width: "auto", height: 34, fontSize: 12 }} value={dateField} onChange={e => { setDateField(e.target.value); setDateFrom(""); setDateTo(""); }}>
                     <option value="">فلتر بالتاريخ</option>
                     <option value="created_at">تاريخ الإضافة</option>
@@ -1505,6 +1582,9 @@ export default function App() {
 
       {(modal?.type === "add-lead" || modal?.type === "edit-lead") && (
         <LeadModal lead={modal.data} messages={messages} projects={projects} interests={interests}
+          regions={regions} jobs={jobs}
+          onQuickAddRegion={name => addLookup("regions", name, setRegions)}
+          onQuickAddJob={name => addLookup("jobs", name, setJobs)}
           onSave={saveLead} onClose={() => setModal(null)} loading={saving}
           onManageInterests={() => setModal({ type: "manage-interests" })}
           onStageAdvance={advanceStage} />
@@ -1526,6 +1606,18 @@ export default function App() {
         <ManageListModal title="إدارة مجالات الاهتمام" items={interests} saving={saving}
           onAdd={name => addLookup("interests", name, setInterests)}
           onDelete={id => deleteLookup("interests", id, setInterests)}
+          onClose={() => setModal(null)} />
+      )}
+      {modal?.type === "manage-regions" && (
+        <ManageListModal title="إدارة المناطق" items={regions} saving={saving}
+          onAdd={name => addLookup("regions", name, setRegions)}
+          onDelete={id => deleteLookup("regions", id, setRegions)}
+          onClose={() => setModal(null)} />
+      )}
+      {modal?.type === "manage-jobs" && (
+        <ManageListModal title="إدارة الوظائف" items={jobs} saving={saving}
+          onAdd={name => addLookup("jobs", name, setJobs)}
+          onDelete={id => deleteLookup("jobs", id, setJobs)}
           onClose={() => setModal(null)} />
       )}
       {modal?.type === "manage-projects" && (
