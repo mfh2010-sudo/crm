@@ -48,11 +48,22 @@ function buildMessage(body, lead) {
   return `${greeting}\n\n${cleaned}`;
 }
 
-function sendWA(phone, body, lead, onStageAdvance) {
-  const text = buildMessage(body, lead);
+function openWhatsAppRaw(phone, text) {
   const clean = (phone || "").replace(/[^\d+]/g, "");
   const num = clean.startsWith("0") ? "2" + clean.substring(1) : clean;
   window.open(`https://wa.me/${num}?text=${encodeURIComponent(text)}`, "_blank");
+}
+
+// رسالة أكواد التفعيل: نعوّض {الاكواد} بكل كود في سطر، وبعدين نضيف التحية زي أي رسالة
+function buildCodesMessage(body, lead, codes) {
+  const codesText = codes.map(c => c.code).join("\n");
+  const withCodes = (body || "").replace(/{الاكواد}/g, codesText);
+  return buildMessage(withCodes, lead);
+}
+
+function sendWA(phone, body, lead, onStageAdvance) {
+  const text = buildMessage(body, lead);
+  openWhatsAppRaw(phone, text);
   // تحويل تلقائي لـ Send Demo لو المرحلة الحالية Lead أو Qualification
   if (onStageAdvance && (lead?.stage === "lead" || lead?.stage === "qualification")) {
     onStageAdvance(lead.id, "send_demo");
@@ -135,7 +146,7 @@ function InterestPicker({ interests, selected, onChange, onManage }) {
           );
         })}
       </div>
-      <button type="button" onClick={onManage} style={{ fontSize: 11, color: "#4F5BD5", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0 }}>+ إدارة المجالات</button>
+      <button type="button" onClick={onManage} style={{ fontSize: 11, color: "#4F5BD5", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0 }}>+ إدارة الكتب / المجالات</button>
     </div>
   );
 }
@@ -314,7 +325,7 @@ const ALERT_OPTIONS = [
 ];
 
 // ── قسم أكواد التفعيل داخل كارت العميل ──────────────────────────────
-function ActivationCodesSection({ lead, interests, leadInterestIds, bookNames, stockByBook, issuedCodes, onIssue }) {
+function ActivationCodesSection({ lead, interests, leadInterestIds, bookNames, stockByBook, issuedCodes, onIssue, messages, projects }) {
   const leadBookNames = (leadInterestIds || [])
     .map(id => interests.find(i => i.id === id)?.name)
     .filter(n => n && bookNames.includes(n));
@@ -323,14 +334,28 @@ function ActivationCodesSection({ lead, interests, leadInterestIds, bookNames, s
   const [qty, setQty] = useState(2);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [preview, setPreview] = useState(null); // { text, noMsg, book }
 
   const available = book ? (stockByBook[book]?.available || 0) : 0;
+
+  function findCodesMessage(bookName) {
+    const proj = projects.find(p => p.name === bookName);
+    if (!proj) return null;
+    return messages.find(m => m.tag === "كود تفعيل" && m.project_id === proj.id) || null;
+  }
 
   async function handleIssue() {
     if (!book) return;
     setBusy(true);
-    await onIssue(book, Number(qty) || 1);
+    const issued = await onIssue(book, Number(qty) || 1);
     setBusy(false);
+    if (!issued || issued.length === 0) return;
+    const msg = findCodesMessage(book);
+    if (msg) {
+      setPreview({ text: buildCodesMessage(msg.body, lead, issued), noMsg: false, book });
+    } else {
+      setPreview({ text: null, noMsg: true, book });
+    }
   }
 
   function copyAll() {
@@ -359,7 +384,7 @@ function ActivationCodesSection({ lead, interests, leadInterestIds, bookNames, s
         <div style={{ fontSize: 12, color: "#aaa" }}>لا توجد كتب في المخزون بعد</div>
       ) : (
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <select style={{ ...S.inputBase, flex: 1 }} value={book} onChange={e => setBook(e.target.value)}>
+          <select style={{ ...S.inputBase, flex: 1 }} value={book} onChange={e => { setBook(e.target.value); setPreview(null); }}>
             <option value="">اختر الكتاب...</option>
             {bookNames.map(b => <option key={b} value={b}>{b} — متاح {stockByBook[b]?.available || 0}</option>)}
           </select>
@@ -374,6 +399,18 @@ function ActivationCodesSection({ lead, interests, leadInterestIds, bookNames, s
       )}
       {book && available > 0 && available < Number(qty) && (
         <div style={{ marginTop: 6, fontSize: 11, color: "#D97706" }}>⚠️ المتاح {available} فقط من أصل {qty} مطلوبة</div>
+      )}
+
+      {preview?.noMsg && (
+        <div style={{ marginTop: 8, fontSize: 11, color: "#92400E", background: "#FEF3C7", border: "1px solid #fde8a8", borderRadius: 8, padding: "8px 10px" }}>
+          ⚠️ تم إصدار الأكواد، لكن لا توجد رسالة مخصّصة لكتاب "{preview.book}" بعد. من مكتبة الرسائل، أضف رسالة بمشروع "{preview.book}" وتصنيف "كود تفعيل" فيها <b>{"{الاكواد}"}</b>، وفي المرة القادمة ستظهر الرسالة جاهزة تلقائياً. دلوقتي تقدر تنسخ الأكواد يدوياً من فوق.
+        </div>
+      )}
+      {preview?.text && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ background: "#e9fce9", borderRadius: 10, padding: 12, fontSize: 12, color: "#1a3a1a", whiteSpace: "pre-wrap", lineHeight: 1.6, marginBottom: 6 }}>{preview.text}</div>
+          <button type="button" style={S.btnWA} onClick={() => openWhatsAppRaw(lead.phone, preview.text)}>إرسال عبر واتساب</button>
+        </div>
       )}
     </Field>
   );
@@ -640,7 +677,8 @@ function LeadModal({ lead, messages, projects, interests, regions, jobs, onQuick
         <ActivationCodesSection
           lead={lead} interests={interests} leadInterestIds={form.interests}
           bookNames={bookNames} stockByBook={stockByBook}
-          issuedCodes={issuedCodes} onIssue={onIssueCodes} />
+          issuedCodes={issuedCodes} onIssue={onIssueCodes}
+          messages={messages} projects={projects} />
       )}
       <Field label="تعليق"><textarea style={{ ...S.inputBase, height: 60, resize: "vertical" }} value={form.comment} onChange={set("comment")} placeholder="اختياري" /></Field>
       <Field label="تاريخ التنبيه / المتابعة">
@@ -777,16 +815,24 @@ function MsgModal({ msg, projects, onSave, onClose, loading, onManageProjects })
           <option value="">بدون مشروع</option>
           {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
         </select>
-        <button type="button" onClick={onManageProjects} style={{ fontSize: 11, color: "#4F5BD5", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0, marginTop: 5 }}>+ إدارة المشروعات</button>
+        <button type="button" onClick={onManageProjects} style={{ fontSize: 11, color: "#4F5BD5", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0, marginTop: 5 }}>+ إدارة الكتب / المجالات</button>
       </Field>
       <Field label="التصنيف">
         <select style={S.inputBase} value={form.tag} onChange={set("tag")}>
-          {["Lead","Qualification","Demo","Needs Analysis","Proposal","Negotiation","Closing","عام"].map(t => <option key={t}>{t}</option>)}
+          {["Lead","Qualification","Demo","Needs Analysis","Proposal","Negotiation","Closing","كود تفعيل","عام"].map(t => <option key={t}>{t}</option>)}
         </select>
+        {form.tag === "كود تفعيل" && (
+          <div style={{ marginTop: 6, fontSize: 11, color: "#185FA5", background: "#E6F1FB", borderRadius: 7, padding: "6px 10px" }}>
+            ℹ️ هذه الرسالة هي رسالة الأكواد الخاصة بمشروع "{projects.find(p => String(p.id) === form.project_id)?.name || "—"}" — اختر المشروع فوق بحيث يطابق اسم الكتاب بالضبط.
+          </div>
+        )}
       </Field>
       <Field label="نص الرسالة" required>
         <textarea style={{ ...S.inputBase, height: 110, resize: "vertical" }} value={form.body} onChange={set("body")} placeholder="اكتب نص الرسالة..." />
         <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>💡 سطر "مرحبا [اسم الشهرة]" هيتضاف تلقائياً</div>
+        {form.tag === "كود تفعيل" && (
+          <div style={{ fontSize: 11, color: "#888", marginTop: 2 }}>💡 استخدم <b>{"{الاكواد}"}</b> في مكان الكود — هيتعوض بكل الأكواد الصادرة، كل كود في سطر</div>
+        )}
       </Field>
       {preview && <div style={{ background: "#e9fce9", borderRadius: 10, padding: 12, fontSize: 12, color: "#1a3a1a", marginBottom: 10, whiteSpace: "pre-wrap", lineHeight: 1.6 }}>{preview}</div>}
       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
@@ -1344,7 +1390,7 @@ function MsgsView({ messages, projects, onAdd, onEdit, onDelete, onManageProject
             <option value="">كل المشروعات</option>
             {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
           </select>
-          <button style={S.btnSecondary} onClick={onManageProjects}>إدارة المشروعات</button>
+          <button style={S.btnSecondary} onClick={onManageProjects}>إدارة الكتب / المجالات</button>
         </div>
         <button style={S.btnPrimary} onClick={onAdd}>+ رسالة جديدة</button>
       </div>
@@ -1435,7 +1481,6 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [history, setHistory] = useState([]);
   const [interests, setInterests] = useState([]);
-  const [projects, setProjects] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [assignees, setAssignees] = useState([]);
   const [regions, setRegions] = useState([]);
@@ -1470,12 +1515,11 @@ export default function App() {
   useEffect(() => {
     async function fetchAll() {
       setLoading(true);
-      const [l, m, h, i, p, t, a, r, j, ac, th] = await Promise.all([
+      const [l, m, h, i, t, a, r, j, ac, th] = await Promise.all([
         supabase.from("leads").select("*").order("created_at", { ascending: false }),
         supabase.from("messages").select("*").order("sort_order", { ascending: true }),
         supabase.from("lead_history").select("*").order("created_at", { ascending: true }),
         supabase.from("interests").select("*").order("name"),
-        supabase.from("projects").select("*").order("name"),
         supabase.from("tasks").select("*").order("created_at", { ascending: false }),
         supabase.from("assignees").select("*").order("name"),
         supabase.from("regions").select("*").order("name"),
@@ -1484,7 +1528,7 @@ export default function App() {
         supabase.from("stock_alert_thresholds").select("*"),
       ]);
       setLeads(l.data || []); setMessages(m.data || []); setHistory(h.data || []);
-      setInterests(i.data || []); setProjects(p.data || []); setTasks(t.data || []);
+      setInterests(i.data || []); setTasks(t.data || []);
       setAssignees(a.data || []);
       setRegions(r.data || []); setJobs(j.data || []);
       setActivationCodes(ac.data || []); setThresholds(th.data || []);
@@ -1726,9 +1770,9 @@ export default function App() {
     showToast("تم الحذف");
   }, [showToast]);
 
-  const updateProjectColor = useCallback(async (id, color) => {
-    await supabase.from("projects").update({ color }).eq("id", id);
-    setProjects(prev => prev.map(p => p.id === id ? { ...p, color } : p));
+  const updateInterestColor = useCallback(async (id, color) => {
+    await supabase.from("interests").update({ color }).eq("id", id);
+    setInterests(prev => prev.map(p => p.id === id ? { ...p, color } : p));
   }, []);
 
   // ── تحديد متعدد للإرسال الجماعي ───────────────────────────────────
@@ -1925,15 +1969,15 @@ export default function App() {
 
             {tab === "kanban" && <KanbanView leads={filteredLeads} interests={interests} dupPhones={dupPhones} stageFilters={stageFilters} selectedIds={selectedIds} onToggleSelect={toggleSelect} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
             {tab === "table"  && <TableView  leads={filteredLeads} interests={interests} dupPhones={dupPhones} selectedIds={selectedIds} onToggleSelect={toggleSelect} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} sortConfig={sortConfig} onSort={handleSort} />}
-            {tab === "msgs"   && <MsgsView messages={messages} projects={projects} onAdd={() => setModal({ type: "add-msg" })} onEdit={m => setModal({ type: "edit-msg", data: m })} onDelete={deleteMsg} onManageProjects={() => setModal({ type: "manage-projects" })} onReorder={reorderMsgs} />}
-            {tab === "tasks"  && <TasksView tasks={tasks} projects={projects} assignees={assignees} onAdd={() => setModal({ type: "add-task" })} onEdit={t => setModal({ type: "edit-task", data: t })} onDelete={deleteTask} onManageAssignees={() => setModal({ type: "manage-assignees" })} />}
+            {tab === "msgs"   && <MsgsView messages={messages} projects={interests} onAdd={() => setModal({ type: "add-msg" })} onEdit={m => setModal({ type: "edit-msg", data: m })} onDelete={deleteMsg} onManageProjects={() => setModal({ type: "manage-interests" })} onReorder={reorderMsgs} />}
+            {tab === "tasks"  && <TasksView tasks={tasks} projects={interests} assignees={assignees} onAdd={() => setModal({ type: "add-task" })} onEdit={t => setModal({ type: "edit-task", data: t })} onDelete={deleteTask} onManageAssignees={() => setModal({ type: "manage-assignees" })} />}
             {tab === "stock"  && <StockView bookNames={bookNames} stockByBook={stockByBook} thresholdFor={thresholdFor} onSetThreshold={setThreshold} onImport={book => setModal({ type: "import-codes", data: { book } })} />}
           </>
         )}
       </div>
 
       {(modal?.type === "add-lead" || modal?.type === "edit-lead") && (
-        <LeadModal lead={modal.data} messages={messages} projects={projects} interests={interests}
+        <LeadModal lead={modal.data} messages={messages} projects={interests} interests={interests}
           regions={regions} jobs={jobs}
           onQuickAddRegion={name => addLookup("regions", name, setRegions)}
           onQuickAddJob={name => addLookup("jobs", name, setJobs)}
@@ -1944,23 +1988,24 @@ export default function App() {
           issuedCodes={modal.data ? activationCodes.filter(c => c.lead_id === modal.data.id) : []}
           onIssueCodes={(book, qty) => issueCodes(modal.data, book, qty)} />
       )}
-      {modal?.type === "send-wa" && <SendWAModal lead={modal.data} messages={messages} projects={projects} onClose={() => setModal(null)} onStageAdvance={advanceStage} />}
+      {modal?.type === "send-wa" && <SendWAModal lead={modal.data} messages={messages} projects={interests} onClose={() => setModal(null)} onStageAdvance={advanceStage} />}
       {(modal?.type === "add-msg" || modal?.type === "edit-msg") && (
-        <MsgModal msg={modal.data} projects={projects} onSave={saveMsg} onClose={() => setModal(null)} loading={saving}
-          onManageProjects={() => setModal({ type: "manage-projects" })} />
+        <MsgModal msg={modal.data} projects={interests} onSave={saveMsg} onClose={() => setModal(null)} loading={saving}
+          onManageProjects={() => setModal({ type: "manage-interests" })} />
       )}
       {modal?.type === "history" && <HistoryModal lead={modal.data} history={leadHistory} onClose={() => setModal(null)} />}
       {(modal?.type === "add-task" || modal?.type === "edit-task") && (
-        <TaskModal task={modal.data} projects={projects} assignees={assignees} onSave={saveTask} onClose={() => setModal(null)} loading={saving} />
+        <TaskModal task={modal.data} projects={interests} assignees={assignees} onSave={saveTask} onClose={() => setModal(null)} loading={saving} />
       )}
       {modal?.type === "manage-assignees" && (
         <ManageListModal title="إدارة المنفذين" items={assignees} saving={saving}
           onAdd={addAssignee} onDelete={deleteAssignee} onClose={() => setModal(null)} />
       )}
       {modal?.type === "manage-interests" && (
-        <ManageListModal title="إدارة مجالات الاهتمام" items={interests} saving={saving}
+        <ManageListModal title="إدارة الكتب / المجالات" items={interests} saving={saving} showColor
           onAdd={name => addLookup("interests", name, setInterests)}
           onDelete={id => deleteLookup("interests", id, setInterests)}
+          onUpdateColor={updateInterestColor}
           onClose={() => setModal(null)} />
       )}
       {modal?.type === "manage-regions" && (
@@ -1975,17 +2020,10 @@ export default function App() {
           onDelete={id => deleteLookup("jobs", id, setJobs)}
           onClose={() => setModal(null)} />
       )}
-      {modal?.type === "manage-projects" && (
-        <ManageListModal title="إدارة المشروعات" items={projects} saving={saving} showColor
-          onAdd={name => addLookup("projects", name, setProjects)}
-          onDelete={id => deleteLookup("projects", id, setProjects)}
-          onUpdateColor={updateProjectColor}
-          onClose={() => setModal(null)} />
-      )}
       {modal?.type === "bulk-send" && (
         <BulkSendModal
           leads={leads.filter(l => selectedIds.has(l.id))}
-          messages={messages} projects={projects}
+          messages={messages} projects={interests}
           onStageAdvance={advanceStage}
           onDone={id => setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; })}
           onClose={() => setModal(null)} />
