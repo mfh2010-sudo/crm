@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { supabase } from "./supabase.js";
+import * as XLSX from "xlsx";
 
 const STAGES = [
   { id: "lead",            label: "Lead",            color: "#6B7FD4", bg: "#EEEDFE", text: "#3C3489" },
@@ -312,8 +313,255 @@ const ALERT_OPTIONS = [
   { id: "notdone", label: "لم يتم بعد",   color: "#BA7517", bg: "#FAEEDA", text: "#633806" },
 ];
 
+// ── قسم أكواد التفعيل داخل كارت العميل ──────────────────────────────
+function ActivationCodesSection({ lead, interests, leadInterestIds, bookNames, stockByBook, issuedCodes, onIssue }) {
+  const leadBookNames = (leadInterestIds || [])
+    .map(id => interests.find(i => i.id === id)?.name)
+    .filter(n => n && bookNames.includes(n));
+
+  const [book, setBook] = useState(leadBookNames[0] || "");
+  const [qty, setQty] = useState(2);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const available = book ? (stockByBook[book]?.available || 0) : 0;
+
+  async function handleIssue() {
+    if (!book) return;
+    setBusy(true);
+    await onIssue(book, Number(qty) || 1);
+    setBusy(false);
+  }
+
+  function copyAll() {
+    const text = issuedCodes.map(c => c.code).join("\n");
+    navigator.clipboard?.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  return (
+    <Field label="أكواد التفعيل">
+      {issuedCodes.length > 0 && (
+        <div style={{ background: "#F0FFF8", border: "1px solid #c8ecd8", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: "#0a6640", fontWeight: 700, marginBottom: 5 }}>أكواد مُسلَّمة لهذا العميل ({issuedCodes.length})</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+            {issuedCodes.map(c => (
+              <span key={c.id} style={{ fontSize: 12, fontFamily: "monospace", background: "#fff", border: "1px solid #c8ecd8", borderRadius: 6, padding: "3px 8px", direction: "ltr" }}>{c.code}</span>
+            ))}
+          </div>
+          <button type="button" onClick={copyAll} style={{ marginTop: 6, fontSize: 11, color: "#0a6640", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", padding: 0 }}>
+            {copied ? "تم النسخ ✓" : "نسخ كل الأكواد"}
+          </button>
+        </div>
+      )}
+      {bookNames.length === 0 ? (
+        <div style={{ fontSize: 12, color: "#aaa" }}>لا توجد كتب في المخزون بعد</div>
+      ) : (
+        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+          <select style={{ ...S.inputBase, flex: 1 }} value={book} onChange={e => setBook(e.target.value)}>
+            <option value="">اختر الكتاب...</option>
+            {bookNames.map(b => <option key={b} value={b}>{b} — متاح {stockByBook[b]?.available || 0}</option>)}
+          </select>
+          <input type="number" min={1} style={{ ...S.inputBase, width: 60, textAlign: "center" }} value={qty} onChange={e => setQty(e.target.value)} />
+          <button type="button" style={{ ...S.btnPrimary, padding: "8px 14px", whiteSpace: "nowrap", opacity: busy || !book ? 0.6 : 1 }} disabled={busy || !book} onClick={handleIssue}>
+            {busy ? "..." : "إصدار"}
+          </button>
+        </div>
+      )}
+      {book && available === 0 && (
+        <div style={{ marginTop: 6, fontSize: 11, color: "#DC2626" }}>⚠️ لا يوجد مخزون متاح لهذا الكتاب — استورد أكواد جديدة من شاشة "مخزون الأكواد"</div>
+      )}
+      {book && available > 0 && available < Number(qty) && (
+        <div style={{ marginTop: 6, fontSize: 11, color: "#D97706" }}>⚠️ المتاح {available} فقط من أصل {qty} مطلوبة</div>
+      )}
+    </Field>
+  );
+}
+
+// ── شاشة مخزون الأكواد ───────────────────────────────────────────────
+function StockView({ bookNames, stockByBook, thresholdFor, onSetThreshold, onImport }) {
+  if (bookNames.length === 0) {
+    return <div style={{ textAlign: "center", color: "#aaa", padding: "3rem" }}>لا توجد كتب بعد — استورد أول ملف أكواد لتبدأ</div>;
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {bookNames.map(b => {
+        const s = stockByBook[b] || { available: 0, issued: 0 };
+        const th = thresholdFor(b);
+        const low = s.available <= th;
+        return (
+          <div key={b} style={{ ...S.card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", ...(low ? { borderColor: "#FCA5A5", background: "#FEF8F8" } : {}) }}>
+            <div style={{ minWidth: 140, fontWeight: 700, fontSize: 14 }}>{b}</div>
+            <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 20, fontWeight: 800, color: low ? "#DC2626" : "#1a9e75" }}>{s.available}</div>
+                <div style={{ fontSize: 10, color: "#888" }}>متاح</div>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 20, fontWeight: 800, color: "#888" }}>{s.issued}</div>
+                <div style={{ fontSize: 10, color: "#888" }}>مُسلَّم</div>
+              </div>
+              {low && <span style={{ fontSize: 11, background: "#FEE2E2", color: "#DC2626", padding: "3px 9px", borderRadius: 10, fontWeight: 700 }}>⚠️ مخزون منخفض</span>}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <label style={{ fontSize: 11, color: "#888" }}>حد التنبيه</label>
+              <input type="number" min={0} defaultValue={th} style={{ ...S.inputBase, width: 56, textAlign: "center" }}
+                onBlur={e => onSetThreshold(b, e.target.value)} />
+              <button style={{ ...S.btnSecondary, padding: "6px 12px", fontSize: 12 }} onClick={() => onImport(b)}>استيراد أكواد</button>
+            </div>
+          </div>
+        );
+      })}
+      <div>
+        <button style={{ ...S.btnSecondary, padding: "8px 14px", fontSize: 12 }} onClick={() => onImport("")}>+ استيراد لكتاب جديد</button>
+      </div>
+    </div>
+  );
+}
+
+// ── Modal استيراد أكواد من ملف Excel ────────────────────────────────
+function ImportCodesModal({ book: initialBook, bookNames, saving, onImport, onClose }) {
+  const [book, setBook] = useState(initialBook || "");
+  const [customBook, setCustomBook] = useState("");
+  const [codes, setCodes] = useState([]);
+  const [fileName, setFileName] = useState("");
+
+  const finalBook = book === "__new__" ? customBook.trim() : book;
+
+  function handleFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = evt => {
+      try {
+        const wb = XLSX.read(evt.target.result, { type: "array" });
+        const sheet = wb.Sheets[wb.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+        const flat = rows.map(r => r[0]).filter(v => v !== undefined && v !== null && String(v).trim() !== "");
+        setCodes(flat);
+      } catch {
+        setCodes([]);
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function handleImport() {
+    if (!finalBook) { alert("اختر أو اكتب اسم الكتاب"); return; }
+    if (codes.length === 0) { alert("اختر ملف فيه أكواد أولاً"); return; }
+    onImport(finalBook, codes);
+    onClose();
+  }
+
+  return (
+    <Modal title="استيراد أكواد تفعيل" onClose={onClose}>
+      <Field label="الكتاب" required>
+        <select style={S.inputBase} value={book} onChange={e => setBook(e.target.value)}>
+          <option value="">اختر الكتاب...</option>
+          {bookNames.map(b => <option key={b} value={b}>{b}</option>)}
+          <option value="__new__">+ كتاب جديد...</option>
+        </select>
+        {book === "__new__" && (
+          <input style={{ ...S.inputBase, marginTop: 6 }} value={customBook} onChange={e => setCustomBook(e.target.value)} placeholder="اسم الكتاب الجديد" />
+        )}
+      </Field>
+      <Field label="ملف الأكواد (Excel)" required>
+        <input type="file" accept=".xlsx,.xls,.csv" onChange={handleFile} style={{ fontSize: 13 }} />
+        {fileName && <div style={{ fontSize: 11, color: "#888", marginTop: 5 }}>{fileName} — {codes.length} كود تم اكتشافه</div>}
+      </Field>
+      <div style={{ fontSize: 11, color: "#888", marginBottom: 8 }}>يُفترض أن يحتوي العمود الأول في أول ورقة على كود واحد في كل سطر.</div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+        <button style={S.btnSecondary} onClick={onClose}>إلغاء</button>
+        <button style={{ ...S.btnPrimary, opacity: saving ? 0.7 : 1 }} disabled={saving || codes.length === 0 || !finalBook} onClick={handleImport}>
+          {saving ? "جاري الاستيراد..." : `استيراد ${codes.length || ""} كود`}
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+// ── Modal الإرسال الجماعي ────────────────────────────────────────────
+function BulkSendModal({ leads, messages, projects, onStageAdvance, onDone, onClose }) {
+  const [selectedMsg, setSelectedMsg] = useState(null);
+  const [projFilter, setProjFilter] = useState("");
+  const [sentIds, setSentIds] = useState(() => new Set());
+
+  const filtered = projFilter ? messages.filter(m => String(m.project_id) === projFilter) : messages;
+
+  function send(lead) {
+    sendWA(lead.phone, selectedMsg.body, lead, onStageAdvance);
+    setSentIds(prev => new Set(prev).add(lead.id));
+    onDone(lead.id);
+  }
+
+  if (!selectedMsg) {
+    return (
+      <Modal title={`إرسال جماعي لـ ${leads.length} عميل`} onClose={onClose}>
+        <div style={{ fontSize: 12, color: "#888", marginBottom: 10 }}>اختر الرسالة اللي عايز تبعتها، وبعدين تقدر تفتحها لكل عميل بضغطة واحدة.</div>
+        {projects.length > 0 && (
+          <select style={{ ...S.inputBase, marginBottom: 10 }} value={projFilter} onChange={e => setProjFilter(e.target.value)}>
+            <option value="">كل المشروعات</option>
+            {projects.map(p => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+          </select>
+        )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 360, overflowY: "auto" }}>
+          {filtered.length === 0 && <div style={{ fontSize: 13, color: "#aaa", textAlign: "center", padding: "1rem" }}>لا توجد رسائل</div>}
+          {filtered.map(m => {
+            const proj = projects.find(p => p.id === m.project_id);
+            return (
+              <div key={m.id} onClick={() => setSelectedMsg(m)} style={{ cursor: "pointer", background: "#f8f9fa", border: "1px solid #eee", borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>{m.title}</span>
+                  {proj && <span style={{ fontSize: 10, padding: "1px 7px", borderRadius: 8, background: projBg(proj), color: projColor(proj), fontWeight: 600 }}>{proj.name}</span>}
+                </div>
+                <div style={{ fontSize: 11, color: "#777", lineHeight: 1.5 }}>{m.body.substring(0, 80)}…</div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: 12, textAlign: "left" }}><button style={S.btnSecondary} onClick={onClose}>إغلاق</button></div>
+      </Modal>
+    );
+  }
+
+  const remaining = leads.filter(l => !sentIds.has(l.id)).length;
+
+  return (
+    <Modal title={`إرسال: ${selectedMsg.title}`} onClose={onClose}>
+      <div style={{ fontSize: 11, color: "#185FA5", background: "#E6F1FB", borderRadius: 8, padding: "6px 10px", marginBottom: 10 }}>
+        ℹ️ اضغط "إرسال" لكل عميل على حدة — واتساب هيفتح برسالة جاهزة، وإنت تأكد الإرسال من جوه واتساب.
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 360, overflowY: "auto" }}>
+        {leads.map(l => {
+          const sent = sentIds.has(l.id);
+          return (
+            <div key={l.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: sent ? "#F0FFF8" : "#f8f9fa", border: "1px solid " + (sent ? "#c8ecd8" : "#eee"), borderRadius: 10, padding: "8px 12px" }}>
+              <div style={{ fontSize: 13, fontWeight: 700, textDecoration: sent ? "line-through" : "none", color: sent ? "#aaa" : "#1a1a1a" }}>
+                {l.nickname || l.name || l.phone}
+                <span style={{ fontSize: 11, fontWeight: 400, color: "#999", marginRight: 6 }}> — {l.phone}</span>
+              </div>
+              {sent
+                ? <span style={{ fontSize: 11, color: "#0a6640", fontWeight: 700 }}>تم الفتح ✓</span>
+                : <button style={S.btnWA} onClick={() => send(l)}>إرسال</button>}
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 12, color: "#888" }}>{remaining > 0 ? `باقي ${remaining}` : "تم إرسال الكل ✓"}</span>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button style={S.btnSecondary} onClick={() => setSelectedMsg(null)}>تغيير الرسالة</button>
+          <button style={S.btnPrimary} onClick={onClose}>إغلاق</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ── Lead Modal ─────────────────────────────────────────────────────
-function LeadModal({ lead, messages, projects, interests, regions, jobs, onQuickAddRegion, onQuickAddJob, onSave, onClose, loading, onManageInterests, onStageAdvance }) {
+function LeadModal({ lead, messages, projects, interests, regions, jobs, onQuickAddRegion, onQuickAddJob, onSave, onClose, loading, onManageInterests, onStageAdvance, bookNames, stockByBook, issuedCodes, onIssueCodes }) {
   const isEdit = !!lead?.id;
 
   // تاريخ تنبيه تلقائي بعد أسبوع من اليوم للـ leads الجدد
@@ -388,6 +636,12 @@ function LeadModal({ lead, messages, projects, interests, regions, jobs, onQuick
       <Field label="مجالات الاهتمام">
         <InterestPicker interests={interests} selected={form.interests} onChange={v => setForm(f => ({ ...f, interests: v }))} onManage={onManageInterests} />
       </Field>
+      {isEdit && (
+        <ActivationCodesSection
+          lead={lead} interests={interests} leadInterestIds={form.interests}
+          bookNames={bookNames} stockByBook={stockByBook}
+          issuedCodes={issuedCodes} onIssue={onIssueCodes} />
+      )}
       <Field label="تعليق"><textarea style={{ ...S.inputBase, height: 60, resize: "vertical" }} value={form.comment} onChange={set("comment")} placeholder="اختياري" /></Field>
       <Field label="تاريخ التنبيه / المتابعة">
         <input type="date" style={S.inputBase} value={form.alert_date} onChange={set("alert_date")} min={todayStr()} />
@@ -568,7 +822,7 @@ function HistoryModal({ lead, history, onClose }) {
   );
 }
 
-function KanbanView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHistory, stageFilters }) {
+function KanbanView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHistory, stageFilters, selectedIds, onToggleSelect }) {
   // الـ Kanban يعرض المراحل العادية دايماً + No Current Need لو اتحددت في الفلتر
   const visibleStages = stageFilters.includes("no_current_need")
     ? STAGES
@@ -588,9 +842,10 @@ function KanbanView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHis
                 <span style={{ fontSize: 10, background: s.bg, color: s.text, padding: "1px 7px", borderRadius: 10, fontWeight: 700 }}>{cards.length}</span>
               </div>
               {cards.map(l => (
-                <div key={l.id} onClick={() => onEdit(l)} style={{ background: "#fff", border: "1px solid #e8e8e8", borderRadius: 9, padding: "8px 9px", marginBottom: 8, cursor: "pointer" }}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = s.color} onMouseLeave={e => e.currentTarget.style.borderColor = "#e8e8e8"}>
+                <div key={l.id} onClick={() => onEdit(l)} style={{ background: "#fff", border: "1px solid " + (selectedIds?.has(l.id) ? "#4F5BD5" : "#e8e8e8"), borderRadius: 9, padding: "8px 9px", marginBottom: 8, cursor: "pointer" }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = s.color} onMouseLeave={e => e.currentTarget.style.borderColor = selectedIds?.has(l.id) ? "#4F5BD5" : "#e8e8e8"}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: "#1a1a1a", marginBottom: 2, display: "flex", alignItems: "center", gap: 5 }}>
+                    <input type="checkbox" checked={!!selectedIds?.has(l.id)} onClick={e => e.stopPropagation()} onChange={() => onToggleSelect?.(l.id)} style={{ cursor: "pointer" }} />
                     {l.nickname || l.name || l.phone}
                     {dupPhones.has((l.phone || "").replace(/\s/g, "")) && (
                       <span title="رقم مكرر" style={{ fontSize: 10, background: "#FEE2E2", color: "#DC2626", padding: "1px 5px", borderRadius: 6, fontWeight: 700 }}>مكرر</span>
@@ -621,7 +876,7 @@ function KanbanView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHis
   );
 }
 
-function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHistory, sortConfig, onSort }) {
+function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHistory, sortConfig, onSort, selectedIds, onToggleSelect }) {
   const sorted = useMemo(() => {
     const arr = [...leads];
     if (sortConfig.key === "alert_date") return arr.sort((a, b) => {
@@ -660,6 +915,7 @@ function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHist
     <div style={{ overflowX: "auto" }}>
       <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 850 }}>
         <thead><tr>
+          <th style={{ ...th, cursor: "default" }}></th>
           <th style={th} onClick={() => onSort("name")}>الاسم الكامل<SortIcon k="name" /></th>
           <th style={{ ...th, cursor: "default" }}>الموبايل</th>
           <th style={{ ...th, cursor: "default" }}>الوظيفة</th>
@@ -671,9 +927,10 @@ function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHist
           <th style={{ ...th, cursor: "default" }}>إجراءات</th>
         </tr></thead>
         <tbody>
-          {sorted.length === 0 && <tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد نتائج</td></tr>}
+          {sorted.length === 0 && <tr><td colSpan={10} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد نتائج</td></tr>}
           {sorted.map(l => { const si = stageInfo(l.stage); return (
             <tr key={l.id} onMouseEnter={e => e.currentTarget.style.background = "#fafafa"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+              <td style={td}><input type="checkbox" checked={!!selectedIds?.has(l.id)} onChange={() => onToggleSelect?.(l.id)} style={{ cursor: "pointer" }} /></td>
               <td style={{ ...td, fontWeight: 700 }}>{l.name || l.nickname || "—"}</td>
               <td style={{ ...td, direction: "ltr", textAlign: "right" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "flex-end" }}>
@@ -1183,6 +1440,9 @@ export default function App() {
   const [assignees, setAssignees] = useState([]);
   const [regions, setRegions] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [activationCodes, setActivationCodes] = useState([]);
+  const [thresholds, setThresholds] = useState([]);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
@@ -1210,7 +1470,7 @@ export default function App() {
   useEffect(() => {
     async function fetchAll() {
       setLoading(true);
-      const [l, m, h, i, p, t, a, r, j] = await Promise.all([
+      const [l, m, h, i, p, t, a, r, j, ac, th] = await Promise.all([
         supabase.from("leads").select("*").order("created_at", { ascending: false }),
         supabase.from("messages").select("*").order("sort_order", { ascending: true }),
         supabase.from("lead_history").select("*").order("created_at", { ascending: true }),
@@ -1220,11 +1480,14 @@ export default function App() {
         supabase.from("assignees").select("*").order("name"),
         supabase.from("regions").select("*").order("name"),
         supabase.from("jobs").select("*").order("name"),
+        supabase.from("activation_codes").select("*").order("id", { ascending: true }),
+        supabase.from("stock_alert_thresholds").select("*"),
       ]);
       setLeads(l.data || []); setMessages(m.data || []); setHistory(h.data || []);
       setInterests(i.data || []); setProjects(p.data || []); setTasks(t.data || []);
       setAssignees(a.data || []);
       setRegions(r.data || []); setJobs(j.data || []);
+      setActivationCodes(ac.data || []); setThresholds(th.data || []);
       setLoading(false);
     }
     fetchAll();
@@ -1468,11 +1731,91 @@ export default function App() {
     setProjects(prev => prev.map(p => p.id === id ? { ...p, color } : p));
   }, []);
 
+  // ── تحديد متعدد للإرسال الجماعي ───────────────────────────────────
+  const toggleSelect = useCallback((id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }, []);
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  // ── مخزون أكواد التفعيل ────────────────────────────────────────────
+  // قائمة أسماء الكتب: اتحاد مجالات الاهتمام + أي كتاب موجود فعلاً في المخزون
+  const bookNames = useMemo(() => {
+    const names = new Set(interests.map(i => i.name));
+    activationCodes.forEach(c => names.add(c.book));
+    thresholds.forEach(t => names.add(t.book));
+    return [...names].sort((a, b) => a.localeCompare(b, "ar"));
+  }, [interests, activationCodes, thresholds]);
+
+  const stockByBook = useMemo(() => {
+    const map = {};
+    bookNames.forEach(b => { map[b] = { available: 0, issued: 0 }; });
+    activationCodes.forEach(c => {
+      if (!map[c.book]) map[c.book] = { available: 0, issued: 0 };
+      map[c.book][c.status === "issued" ? "issued" : "available"]++;
+    });
+    return map;
+  }, [bookNames, activationCodes]);
+
+  function thresholdFor(book) {
+    const t = thresholds.find(x => x.book === book);
+    return t ? t.threshold : 5;
+  }
+
+  const importCodes = useCallback(async (book, codes) => {
+    const clean = [...new Set(codes.map(c => String(c).trim()).filter(Boolean))];
+    if (clean.length === 0) { showToast("لا توجد أكواد صالحة في الملف", "error"); return; }
+    setSaving(true);
+    const rows = clean.map(code => ({ book, code, status: "available" }));
+    const { data, error } = await supabase.from("activation_codes")
+      .upsert(rows, { onConflict: "code", ignoreDuplicates: true })
+      .select();
+    setSaving(false);
+    if (error) { showToast("خطأ في الاستيراد", "error"); return; }
+    // أعد تحميل المخزون كامل لضمان دقة العدّادات (upsert مع ignoreDuplicates لا يرجّع المكرر)
+    const { data: all } = await supabase.from("activation_codes").select("*").order("id", { ascending: true });
+    setActivationCodes(all || []);
+    const added = (data || []).length;
+    showToast(`تم استيراد ${added} كود جديد ✓${added < clean.length ? ` (${clean.length - added} موجود مسبقاً)` : ""}`);
+  }, [showToast]);
+
+  const setThreshold = useCallback(async (book, value) => {
+    const n = Math.max(0, Number(value) || 0);
+    const { data } = await supabase.from("stock_alert_thresholds")
+      .upsert({ book, threshold: n }, { onConflict: "book" }).select().single();
+    if (data) setThresholds(prev => [...prev.filter(t => t.book !== book), data]);
+  }, []);
+
+  const issueCodes = useCallback(async (lead, book, qty) => {
+    const available = activationCodes.filter(c => c.book === book && c.status === "available").slice(0, qty);
+    if (available.length === 0) { showToast(`لا يوجد مخزون متاح لكتاب ${book}`, "error"); return null; }
+    setSaving(true);
+    const ids = available.map(c => c.id);
+    const { data, error } = await supabase.from("activation_codes")
+      .update({ status: "issued", lead_id: lead.id, issued_at: new Date().toISOString() })
+      .in("id", ids).select();
+    setSaving(false);
+    if (error || !data) { showToast("خطأ في إصدار الأكواد", "error"); return null; }
+    setActivationCodes(prev => prev.map(c => { const u = data.find(x => x.id === c.id); return u || c; }));
+    await supabase.from("lead_history").insert({
+      lead_id: lead.id, stage: lead.stage,
+      comment: `تم إصدار ${data.length} كود تفعيل (${book}): ${data.map(c => c.code).join(", ")}`,
+    });
+    setHistory(prev => [...prev, { lead_id: lead.id, stage: lead.stage, comment: "إصدار أكواد", created_at: new Date().toISOString() }]);
+    if (available.length < qty) showToast(`تم إصدار ${available.length} فقط من ${qty} — المخزون قارب على الانتهاء`, "error");
+    else showToast(`تم إصدار ${data.length} كود ✓`);
+    return data;
+  }, [activationCodes, showToast]);
+
   const TABS = [
     { id: "kanban", label: "Kanban Board" },
     { id: "table",  label: "جدول" },
     { id: "msgs",   label: "مكتبة الرسائل" },
     { id: "tasks",  label: "المهام" },
+    { id: "stock",  label: "مخزون الأكواد" },
   ];
   const leadHistory = modal?.data?.id ? history.filter(h => h.lead_id === modal.data.id) : [];
   const hasFilters = q || stageFilters.length > 0 || interestFilters.length > 0 || alertFilters.length > 0 || regionFilters.length > 0 || jobFilters.length > 0 || showDupes || dateFrom || dateTo;
@@ -1572,10 +1915,19 @@ export default function App() {
               </div>
             )}
 
-            {tab === "kanban" && <KanbanView leads={filteredLeads} interests={interests} dupPhones={dupPhones} stageFilters={stageFilters} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
-            {tab === "table"  && <TableView  leads={filteredLeads} interests={interests} dupPhones={dupPhones} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} sortConfig={sortConfig} onSort={handleSort} />}
+            {(tab === "kanban" || tab === "table") && selectedIds.size > 0 && (
+              <div style={{ position: "sticky", top: 0, zIndex: 5, display: "flex", alignItems: "center", gap: 10, background: "#EEEDFE", border: "1px solid #c7c2f5", borderRadius: 10, padding: "8px 14px", marginBottom: 12 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#3C3489" }}>تم تحديد {selectedIds.size} عميل</span>
+                <button style={{ ...S.btnPrimary, padding: "6px 14px", fontSize: 12 }} onClick={() => setModal({ type: "bulk-send" })}>📤 إرسال جماعي</button>
+                <button style={{ ...S.btnSecondary, padding: "6px 14px", fontSize: 12 }} onClick={clearSelection}>إلغاء التحديد</button>
+              </div>
+            )}
+
+            {tab === "kanban" && <KanbanView leads={filteredLeads} interests={interests} dupPhones={dupPhones} stageFilters={stageFilters} selectedIds={selectedIds} onToggleSelect={toggleSelect} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
+            {tab === "table"  && <TableView  leads={filteredLeads} interests={interests} dupPhones={dupPhones} selectedIds={selectedIds} onToggleSelect={toggleSelect} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} sortConfig={sortConfig} onSort={handleSort} />}
             {tab === "msgs"   && <MsgsView messages={messages} projects={projects} onAdd={() => setModal({ type: "add-msg" })} onEdit={m => setModal({ type: "edit-msg", data: m })} onDelete={deleteMsg} onManageProjects={() => setModal({ type: "manage-projects" })} onReorder={reorderMsgs} />}
             {tab === "tasks"  && <TasksView tasks={tasks} projects={projects} assignees={assignees} onAdd={() => setModal({ type: "add-task" })} onEdit={t => setModal({ type: "edit-task", data: t })} onDelete={deleteTask} onManageAssignees={() => setModal({ type: "manage-assignees" })} />}
+            {tab === "stock"  && <StockView bookNames={bookNames} stockByBook={stockByBook} thresholdFor={thresholdFor} onSetThreshold={setThreshold} onImport={book => setModal({ type: "import-codes", data: { book } })} />}
           </>
         )}
       </div>
@@ -1587,7 +1939,10 @@ export default function App() {
           onQuickAddJob={name => addLookup("jobs", name, setJobs)}
           onSave={saveLead} onClose={() => setModal(null)} loading={saving}
           onManageInterests={() => setModal({ type: "manage-interests" })}
-          onStageAdvance={advanceStage} />
+          onStageAdvance={advanceStage}
+          bookNames={bookNames} stockByBook={stockByBook}
+          issuedCodes={modal.data ? activationCodes.filter(c => c.lead_id === modal.data.id) : []}
+          onIssueCodes={(book, qty) => issueCodes(modal.data, book, qty)} />
       )}
       {modal?.type === "send-wa" && <SendWAModal lead={modal.data} messages={messages} projects={projects} onClose={() => setModal(null)} onStageAdvance={advanceStage} />}
       {(modal?.type === "add-msg" || modal?.type === "edit-msg") && (
@@ -1626,6 +1981,18 @@ export default function App() {
           onDelete={id => deleteLookup("projects", id, setProjects)}
           onUpdateColor={updateProjectColor}
           onClose={() => setModal(null)} />
+      )}
+      {modal?.type === "bulk-send" && (
+        <BulkSendModal
+          leads={leads.filter(l => selectedIds.has(l.id))}
+          messages={messages} projects={projects}
+          onStageAdvance={advanceStage}
+          onDone={id => setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; })}
+          onClose={() => setModal(null)} />
+      )}
+      {modal?.type === "import-codes" && (
+        <ImportCodesModal book={modal.data.book} bookNames={bookNames} saving={saving}
+          onImport={importCodes} onClose={() => setModal(null)} />
       )}
     </div>
   );
