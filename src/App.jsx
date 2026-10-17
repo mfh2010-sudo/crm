@@ -598,7 +598,7 @@ function BulkSendModal({ leads, messages, projects, onStageAdvance, onDone, onCl
 }
 
 // ── Lead Modal ─────────────────────────────────────────────────────
-function LeadModal({ lead, messages, projects, interests, regions, jobs, onQuickAddRegion, onQuickAddJob, onSave, onClose, loading, onManageInterests, onStageAdvance, bookNames, stockByBook, issuedCodes, onIssueCodes }) {
+function LeadModal({ lead, messages, projects, interests, regions, jobs, specialties, onQuickAddRegion, onQuickAddJob, onQuickAddSpecialty, onSave, onClose, loading, onManageInterests, onStageAdvance, bookNames, stockByBook, issuedCodes, onIssueCodes }) {
   const isEdit = !!lead?.id;
 
   // تاريخ تنبيه تلقائي بعد أسبوع من اليوم للـ leads الجدد
@@ -614,6 +614,7 @@ function LeadModal({ lead, messages, projects, interests, regions, jobs, onQuick
     email:     lead?.email     || "",
     name:      lead?.name      || "",
     job:       lead?.job       || "",
+    specialty: lead?.specialty || "",
     company:   lead?.company   || "",
     region:    lead?.region    || "",
     address:   lead?.address   || "",
@@ -658,12 +659,17 @@ function LeadModal({ lead, messages, projects, interests, regions, jobs, onQuick
         <Field label="الاسم الكامل"><input style={S.inputBase} value={form.name} onChange={set("name")} placeholder="اختياري" /></Field>
         <Field label="البريد الإلكتروني"><input type="email" style={{ ...S.inputBase, direction: "ltr", textAlign: "right" }} value={form.email} onChange={set("email")} placeholder="name@example.com" /></Field>
         <Field label="الوظيفة">
-          <LookupSelect items={jobs} value={form.job} onChange={v => setForm(f => ({ ...f, job: v }))} onQuickAdd={onQuickAddJob} placeholder="اختر الوظيفة" />
+          <LookupSelect items={jobs} value={form.job} onChange={v => setForm(f => ({ ...f, job: v, specialty: v === "طبيب" ? f.specialty : "" }))} onQuickAdd={onQuickAddJob} placeholder="اختر الوظيفة" />
         </Field>
         <Field label="المنطقة">
           <LookupSelect items={regions} value={form.region} onChange={v => setForm(f => ({ ...f, region: v }))} onQuickAdd={onQuickAddRegion} placeholder="اختر المنطقة" />
         </Field>
       </div>
+      {form.job === "طبيب" && (
+        <Field label="التخصص">
+          <LookupSelect items={specialties} value={form.specialty} onChange={v => setForm(f => ({ ...f, specialty: v }))} onQuickAdd={onQuickAddSpecialty} placeholder="اختر التخصص" />
+        </Field>
+      )}
       <Field label="اسم الشركة"><input style={S.inputBase} value={form.company} onChange={set("company")} placeholder="اختياري" /></Field>
       <Field label="العنوان"><input style={S.inputBase} value={form.address} onChange={set("address")} placeholder="اختياري" /></Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
@@ -897,7 +903,7 @@ function KanbanView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHis
                       <span title="رقم مكرر" style={{ fontSize: 10, background: "#FEE2E2", color: "#DC2626", padding: "1px 5px", borderRadius: 6, fontWeight: 700 }}>مكرر</span>
                     )}
                   </div>
-                  {l.job && <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{l.job}</div>}
+                  {l.job && <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{l.job}{l.specialty ? ` — ${l.specialty}` : ""}</div>}
                   {(l.interests || []).length > 0 && (
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 5 }}>
                       {(l.interests || []).slice(0, 2).map(iid => { const it = interests.find(x => x.id === iid); return it ? <span key={iid} style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "#EEEDFE", color: "#3C3489" }}>{it.name}</span> : null; })}
@@ -986,7 +992,7 @@ function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHist
                   {l.phone}
                 </div>
               </td>
-              <td style={{ ...td, color: "#666" }}>{l.job || "—"}</td>
+              <td style={{ ...td, color: "#666" }}>{l.job ? (l.specialty ? `${l.job} — ${l.specialty}` : l.job) : "—"}</td>
               <td style={td}>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
                   {(l.interests || []).map(iid => { const it = interests.find(x => x.id === iid); return it ? <span key={iid} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 8, background: "#EEEDFE", color: "#3C3489", fontWeight: 600 }}>{it.name}</span> : null; })}
@@ -1485,6 +1491,7 @@ export default function App() {
   const [assignees, setAssignees] = useState([]);
   const [regions, setRegions] = useState([]);
   const [jobs, setJobs] = useState([]);
+  const [specialties, setSpecialties] = useState([]);
   const [activationCodes, setActivationCodes] = useState([]);
   const [thresholds, setThresholds] = useState([]);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
@@ -1500,6 +1507,7 @@ export default function App() {
   const [alertFilters, setAlertFilters] = useState([]);
   const [regionFilters, setRegionFilters] = useState([]);
   const [jobFilters, setJobFilters] = useState([]);
+  const [specialtyFilters, setSpecialtyFilters] = useState([]);
   const [dateField, setDateField] = useState(""); // "created_at" | "alert_date"
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -1515,7 +1523,7 @@ export default function App() {
   useEffect(() => {
     async function fetchAll() {
       setLoading(true);
-      const [l, m, h, i, t, a, r, j, ac, th] = await Promise.all([
+      const [l, m, h, i, t, a, r, j, sp, ac, th] = await Promise.all([
         supabase.from("leads").select("*").order("created_at", { ascending: false }),
         supabase.from("messages").select("*").order("sort_order", { ascending: true }),
         supabase.from("lead_history").select("*").order("created_at", { ascending: true }),
@@ -1524,13 +1532,14 @@ export default function App() {
         supabase.from("assignees").select("*").order("name"),
         supabase.from("regions").select("*").order("name"),
         supabase.from("jobs").select("*").order("name"),
+        supabase.from("specialties").select("*").order("name"),
         supabase.from("activation_codes").select("*").order("id", { ascending: true }),
         supabase.from("stock_alert_thresholds").select("*"),
       ]);
       setLeads(l.data || []); setMessages(m.data || []); setHistory(h.data || []);
       setInterests(i.data || []); setTasks(t.data || []);
       setAssignees(a.data || []);
-      setRegions(r.data || []); setJobs(j.data || []);
+      setRegions(r.data || []); setJobs(j.data || []); setSpecialties(sp.data || []);
       setActivationCodes(ac.data || []); setThresholds(th.data || []);
       setLoading(false);
     }
@@ -1552,7 +1561,7 @@ export default function App() {
     const tmrw = tomorrowStr();
     const eow = endOfWeekStr();
     return leads.filter(l => {
-      const text = `${l.nickname || ""} ${l.name || ""} ${l.phone || ""} ${l.job || ""} ${l.email || ""}`;
+      const text = `${l.nickname || ""} ${l.name || ""} ${l.phone || ""} ${l.job || ""} ${l.specialty || ""} ${l.email || ""}`;
       if (q && !text.includes(q)) return false;
       if (stageFilters.length > 0) {
         if (!stageFilters.includes(l.stage)) return false;
@@ -1563,6 +1572,7 @@ export default function App() {
       if (interestFilters.length > 0 && !interestFilters.some(id => (l.interests || []).includes(Number(id)))) return false;
       if (regionFilters.length > 0 && !regionFilters.includes(l.region || "")) return false;
       if (jobFilters.length > 0 && !jobFilters.includes(l.job || "")) return false;
+      if (specialtyFilters.length > 0 && !specialtyFilters.includes(l.specialty || "")) return false;
       if (showDupes && !dupPhones.has((l.phone || "").replace(/\s/g, ""))) return false;
       if (alertFilters.length > 0) {
         const matchAlert = alertFilters.some(f => {
@@ -1593,7 +1603,7 @@ export default function App() {
       }
       return true;
     });
-  }, [leads, q, stageFilters, interestFilters, alertFilters, regionFilters, jobFilters, showDupes, dupPhones, dateField, dateFrom, dateTo]);
+  }, [leads, q, stageFilters, interestFilters, alertFilters, regionFilters, jobFilters, specialtyFilters, showDupes, dupPhones, dateField, dateFrom, dateTo]);
 
   const saveLead = useCallback(async (form, selectedMsg) => {
     setSaving(true);
@@ -1601,7 +1611,7 @@ export default function App() {
     const payload = {
       nickname: form.nickname, phone: form.phone, name: form.name || null,
       email:     (form.email || "").trim() || null,
-      job: form.job || null, comment: form.comment || null,
+      job: form.job || null, specialty: form.job === "طبيب" ? (form.specialty || null) : null, comment: form.comment || null,
       company:   form.company   || null,
       region:    form.region    || null,
       address:   form.address   || null,
@@ -1862,7 +1872,7 @@ export default function App() {
     { id: "stock",  label: "مخزون الأكواد" },
   ];
   const leadHistory = modal?.data?.id ? history.filter(h => h.lead_id === modal.data.id) : [];
-  const hasFilters = q || stageFilters.length > 0 || interestFilters.length > 0 || alertFilters.length > 0 || regionFilters.length > 0 || jobFilters.length > 0 || showDupes || dateFrom || dateTo;
+  const hasFilters = q || stageFilters.length > 0 || interestFilters.length > 0 || alertFilters.length > 0 || regionFilters.length > 0 || jobFilters.length > 0 || specialtyFilters.length > 0 || showDupes || dateFrom || dateTo;
 
   return (
     <div dir="rtl" style={{ fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", background: "#f5f5f7", minHeight: "100vh", paddingBottom: "2rem" }}>
@@ -1921,7 +1931,7 @@ export default function App() {
                   </button>
                   {hasFilters && (
                     <button style={{ ...S.btnSecondary, height: 36, padding: "0 14px" }}
-                      onClick={() => { setQ(""); setStageFilters([]); setInterestFilters([]); setAlertFilters([]); setRegionFilters([]); setJobFilters([]); setShowDupes(false); setDateField(""); setDateFrom(""); setDateTo(""); }}>
+                      onClick={() => { setQ(""); setStageFilters([]); setInterestFilters([]); setAlertFilters([]); setRegionFilters([]); setJobFilters([]); setSpecialtyFilters([]); setShowDupes(false); setDateField(""); setDateFrom(""); setDateTo(""); }}>
                       مسح الفلاتر
                     </button>
                   )}
@@ -1940,8 +1950,17 @@ export default function App() {
                     selected={jobFilters} onChange={setJobFilters}
                     activeColor="#8B5CF6" activeBg="#F3E8FF" activeText="#4C1D95"
                   />
+                  {specialties.length > 0 && (
+                    <MultiSelectPicker
+                      label="كل التخصصات"
+                      options={specialties.map(s => ({ id: s.name, label: s.name, color: "#059669", bg: "#D1FAE5", text: "#065F46" }))}
+                      selected={specialtyFilters} onChange={setSpecialtyFilters}
+                      activeColor="#059669" activeBg="#D1FAE5" activeText="#065F46"
+                    />
+                  )}
                   <button style={{ ...S.btnSecondary, height: 34, padding: "0 10px", fontSize: 12 }} onClick={() => setModal({ type: "manage-regions" })}>إدارة المناطق</button>
                   <button style={{ ...S.btnSecondary, height: 34, padding: "0 10px", fontSize: 12 }} onClick={() => setModal({ type: "manage-jobs" })}>إدارة الوظائف</button>
+                  <button style={{ ...S.btnSecondary, height: 34, padding: "0 10px", fontSize: 12 }} onClick={() => setModal({ type: "manage-specialties" })}>إدارة التخصصات</button>
                   <select style={{ ...S.inputBase, width: "auto", height: 34, fontSize: 12 }} value={dateField} onChange={e => { setDateField(e.target.value); setDateFrom(""); setDateTo(""); }}>
                     <option value="">فلتر بالتاريخ</option>
                     <option value="created_at">تاريخ الإضافة</option>
@@ -1978,9 +1997,10 @@ export default function App() {
 
       {(modal?.type === "add-lead" || modal?.type === "edit-lead") && (
         <LeadModal lead={modal.data} messages={messages} projects={interests} interests={interests}
-          regions={regions} jobs={jobs}
+          regions={regions} jobs={jobs} specialties={specialties}
           onQuickAddRegion={name => addLookup("regions", name, setRegions)}
           onQuickAddJob={name => addLookup("jobs", name, setJobs)}
+          onQuickAddSpecialty={name => addLookup("specialties", name, setSpecialties)}
           onSave={saveLead} onClose={() => setModal(null)} loading={saving}
           onManageInterests={() => setModal({ type: "manage-interests" })}
           onStageAdvance={advanceStage}
@@ -2018,6 +2038,12 @@ export default function App() {
         <ManageListModal title="إدارة الوظائف" items={jobs} saving={saving}
           onAdd={name => addLookup("jobs", name, setJobs)}
           onDelete={id => deleteLookup("jobs", id, setJobs)}
+          onClose={() => setModal(null)} />
+      )}
+      {modal?.type === "manage-specialties" && (
+        <ManageListModal title="إدارة التخصصات" items={specialties} saving={saving}
+          onAdd={name => addLookup("specialties", name, setSpecialties)}
+          onDelete={id => deleteLookup("specialties", id, setSpecialties)}
           onClose={() => setModal(null)} />
       )}
       {modal?.type === "bulk-send" && (
