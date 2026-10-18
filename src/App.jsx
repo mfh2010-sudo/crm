@@ -528,15 +528,17 @@ function ActivationCodesSection({ lead, interests, leadInterestIds, bookNames, s
       {bookNames.length === 0 ? (
         <div style={{ fontSize: 12, color: "#aaa" }}>لا توجد كتب في المخزون بعد</div>
       ) : (
-        <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <select style={{ ...S.inputBase, flex: 1 }} value={book} onChange={e => { setBook(e.target.value); setPreview(null); }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <select style={S.inputBase} value={book} onChange={e => { setBook(e.target.value); setPreview(null); }}>
             <option value="">اختر الكتاب...</option>
             {bookNames.map(b => <option key={b} value={b}>{b} — متاح {stockByBook[b]?.available || 0}</option>)}
           </select>
-          <input type="number" min={1} style={{ ...S.inputBase, width: 60, textAlign: "center" }} value={qty} onChange={e => setQty(e.target.value)} />
-          <button type="button" style={{ ...S.btnPrimary, padding: "8px 14px", whiteSpace: "nowrap", opacity: busy || !book ? 0.6 : 1 }} disabled={busy || !book} onClick={handleIssue}>
-            {busy ? "..." : "إصدار"}
-          </button>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input type="number" min={1} style={{ ...S.inputBase, width: 70, flexShrink: 0, textAlign: "center" }} value={qty} onChange={e => setQty(e.target.value)} />
+            <button type="button" style={{ ...S.btnPrimary, flex: 1, padding: "8px 14px", whiteSpace: "nowrap", opacity: busy || !book ? 0.6 : 1 }} disabled={busy || !book} onClick={handleIssue}>
+              {busy ? "..." : "إصدار"}
+            </button>
+          </div>
         </div>
       )}
       {book && available === 0 && (
