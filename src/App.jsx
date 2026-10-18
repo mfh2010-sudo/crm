@@ -178,6 +178,53 @@ function ManageListModal({ title, items, onAdd, onDelete, onClose, saving, showC
   );
 }
 
+// ── كارت إدارة قائمة مضمّن (بدون modal) — لصفحة الإعدادات ───────────
+function LookupManagerCard({ title, items, onAdd, onDelete, saving, showColor, onUpdateColor }) {
+  const [newName, setNewName] = useState("");
+  function submit() { const v = newName.trim(); if (!v) return; onAdd(v); setNewName(""); }
+  return (
+    <div style={{ background: "#fff", border: "1px solid #eee", borderRadius: 12, padding: 16 }}>
+      <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10, color: "#1a1a1a" }}>{title}</h4>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <input style={{ ...S.inputBase, flex: 1 }} value={newName} onChange={e => setNewName(e.target.value)} placeholder="اسم جديد..." onKeyDown={e => { if (e.key === "Enter") submit(); }} />
+        <button style={S.btnPrimary} disabled={saving || !newName.trim()} onClick={submit}>إضافة</button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto" }}>
+        {items.length === 0 && <div style={{ fontSize: 12, color: "#aaa", textAlign: "center", padding: "0.5rem" }}>القائمة فاضية</div>}
+        {items.map(it => (
+          <div key={it.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fafafa", border: "1px solid #eee", borderRadius: 8, padding: "6px 10px", gap: 8 }}>
+            {showColor && (
+              <input type="color" value={it.color || PROJECT_COLORS[it.id % PROJECT_COLORS.length]} onChange={e => onUpdateColor(it.id, e.target.value)}
+                style={{ width: 24, height: 24, border: "none", borderRadius: 6, cursor: "pointer", padding: 0 }} />
+            )}
+            <span style={{ fontSize: 13, color: "#1a1a1a", flex: 1 }}>{it.name}</span>
+            <button style={{ ...S.btnSecondary, padding: "2px 8px", fontSize: 11, color: "#c00" }} onClick={() => { if (confirm(`حذف "${it.name}"؟`)) onDelete(it.id); }}>حذف</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SettingsView({ regions, jobs, specialties, activities, interests, assignees, saving, onAddLookup, onDeleteLookup, onUpdateInterestColor, onAddAssignee, onDeleteAssignee }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(270px, 1fr))", gap: 16 }}>
+      <LookupManagerCard title="المناطق" items={regions} saving={saving}
+        onAdd={n => onAddLookup("regions", n)} onDelete={id => onDeleteLookup("regions", id)} />
+      <LookupManagerCard title="الوظائف" items={jobs} saving={saving}
+        onAdd={n => onAddLookup("jobs", n)} onDelete={id => onDeleteLookup("jobs", id)} />
+      <LookupManagerCard title="التخصصات" items={specialties} saving={saving}
+        onAdd={n => onAddLookup("specialties", n)} onDelete={id => onDeleteLookup("specialties", id)} />
+      <LookupManagerCard title="نشاط الشركة" items={activities} saving={saving}
+        onAdd={n => onAddLookup("activities", n)} onDelete={id => onDeleteLookup("activities", id)} />
+      <LookupManagerCard title="الكتب / المجالات" items={interests} saving={saving} showColor
+        onAdd={n => onAddLookup("interests", n)} onDelete={id => onDeleteLookup("interests", id)} onUpdateColor={onUpdateInterestColor} />
+      <LookupManagerCard title="المنفذين (المهام)" items={assignees} saving={saving}
+        onAdd={onAddAssignee} onDelete={onDeleteAssignee} />
+    </div>
+  );
+}
+
 function AlertBadge({ date, note, done }) {
   const info = alertLabel(date);
   const [open, setOpen] = useState(false);
@@ -306,6 +353,104 @@ function MultiSelectPicker({ label: defaultLabel, options, selected, onChange, a
           })}
           {selCount > 0 && (
             <div onClick={() => { onChange([]); setOpen(false); }} style={{ fontSize: 11, color: "#c00", textAlign: "center", padding: "6px 0 2px", cursor: "pointer", borderTop: "1px solid #eee", marginTop: 4 }}>مسح الاختيار</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── لوحة الفلاتر الموحّدة ──────────────────────────────────────────
+function FilterRow({ label, children }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+      <span style={{ fontSize: 12, color: "#666", fontWeight: 600, flexShrink: 0 }}>{label}</span>
+      {children}
+    </div>
+  );
+}
+
+function FiltersPanel({
+  stageFilters, setStageFilters,
+  interests, interestFilters, setInterestFilters,
+  alertFilters, setAlertFilters,
+  regions, regionFilters, setRegionFilters,
+  jobs, jobFilters, setJobFilters,
+  specialties, specialtyFilters, setSpecialtyFilters,
+  activities, activityFilters, setActivityFilters,
+  showDupes, setShowDupes, dupCount,
+  dateField, setDateField, dateFrom, setDateFrom, dateTo, setDateTo,
+  activeCount, onClear,
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    function h(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: "relative" }}>
+      <button onClick={() => setOpen(v => !v)}
+        style={{ height: 36, padding: "0 14px", fontSize: 13, border: "1px solid #ddd", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontWeight: activeCount > 0 ? 700 : 500, background: activeCount > 0 ? "#EEEDFE" : "#fafafa", color: activeCount > 0 ? "#3C3489" : "#444" }}>
+        🔍 فلاتر
+        {activeCount > 0 && <span style={{ background: "#4F5BD5", color: "#fff", borderRadius: 10, fontSize: 11, padding: "1px 7px", fontWeight: 700 }}>{activeCount}</span>}
+        <span style={{ fontSize: 10, color: "#888" }}>▾</span>
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 60, background: "#fff", border: "1px solid #ddd", borderRadius: 12, boxShadow: "0 8px 24px rgba(0,0,0,.14)", padding: 16, width: 320 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <FilterRow label="المرحلة">
+              <MultiSelectPicker label="كل المراحل" options={STAGES.map(s => ({ id: s.id, label: s.label, color: s.color, bg: s.bg, text: s.text }))} selected={stageFilters} onChange={setStageFilters} />
+            </FilterRow>
+            <FilterRow label="المجالات">
+              <MultiSelectPicker label="كل المجالات" options={interests.map(i => ({ id: String(i.id), label: i.name, color: "#6B7FD4", bg: "#EEEDFE", text: "#3C3489" }))} selected={interestFilters} onChange={setInterestFilters} activeColor="#6B7FD4" activeBg="#EEEDFE" activeText="#3C3489" />
+            </FilterRow>
+            <FilterRow label="التنبيهات">
+              <MultiSelectPicker label="كل التنبيهات" options={ALERT_OPTIONS} selected={alertFilters} onChange={setAlertFilters} activeColor="#D97706" activeBg="#FEF3C7" activeText="#92400E" />
+            </FilterRow>
+            <FilterRow label="المنطقة">
+              <MultiSelectPicker label="كل المناطق" options={regions.map(r => ({ id: r.name, label: r.name, color: "#0891B2", bg: "#E0F2FE", text: "#0C4A6E" }))} selected={regionFilters} onChange={setRegionFilters} activeColor="#0891B2" activeBg="#E0F2FE" activeText="#0C4A6E" />
+            </FilterRow>
+            <FilterRow label="الوظيفة">
+              <MultiSelectPicker label="كل الوظائف" options={jobs.map(j => ({ id: j.name, label: j.name, color: "#8B5CF6", bg: "#F3E8FF", text: "#4C1D95" }))} selected={jobFilters} onChange={setJobFilters} activeColor="#8B5CF6" activeBg="#F3E8FF" activeText="#4C1D95" />
+            </FilterRow>
+            {specialties.length > 0 && (
+              <FilterRow label="التخصص">
+                <MultiSelectPicker label="كل التخصصات" options={specialties.map(s => ({ id: s.name, label: s.name, color: "#059669", bg: "#D1FAE5", text: "#065F46" }))} selected={specialtyFilters} onChange={setSpecialtyFilters} activeColor="#059669" activeBg="#D1FAE5" activeText="#065F46" />
+              </FilterRow>
+            )}
+            {activities.length > 0 && (
+              <FilterRow label="نشاط الشركة">
+                <MultiSelectPicker label="كل الأنشطة" options={activities.map(a => ({ id: a.name, label: a.name, color: "#D4537E", bg: "#FCE7EF", text: "#831843" }))} selected={activityFilters} onChange={setActivityFilters} activeColor="#D4537E" activeBg="#FCE7EF" activeText="#831843" />
+              </FilterRow>
+            )}
+            <FilterRow label="التاريخ">
+              <select style={{ ...S.inputBase, width: "auto", height: 34, fontSize: 12 }} value={dateField} onChange={e => { setDateField(e.target.value); setDateFrom(""); setDateTo(""); }}>
+                <option value="">بدون</option>
+                <option value="created_at">الإضافة</option>
+                <option value="updated_at">آخر تعديل</option>
+                <option value="alert_date">التنبيه</option>
+              </select>
+            </FilterRow>
+            {dateField && (
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input type="date" style={{ ...S.inputBase, flex: 1, height: 32, fontSize: 12 }} value={dateFrom} onChange={e => setDateFrom(e.target.value)} title="من تاريخ" />
+                <span style={{ fontSize: 11, color: "#888" }}>←</span>
+                <input type="date" style={{ ...S.inputBase, flex: 1, height: 32, fontSize: 12 }} value={dateTo} onChange={e => setDateTo(e.target.value)} title="إلى تاريخ" />
+              </div>
+            )}
+            <FilterRow label="الأرقام المكررة">
+              <button onClick={() => setShowDupes(v => !v)}
+                style={{ height: 32, padding: "0 10px", fontSize: 12, border: "1px solid #ddd", borderRadius: 8, cursor: "pointer", fontWeight: showDupes ? 700 : 400, background: showDupes ? "#FEE2E2" : "#fafafa", color: showDupes ? "#DC2626" : "#444" }}>
+                🔁 {showDupes ? `مكررة (${dupCount})` : "إظهار المكرر"}
+              </button>
+            </FilterRow>
+          </div>
+          {activeCount > 0 && (
+            <button style={{ ...S.btnSecondary, width: "100%", marginTop: 14, color: "#c00" }} onClick={onClear}>مسح كل الفلاتر</button>
           )}
         </div>
       )}
@@ -519,6 +664,51 @@ function ImportCodesModal({ book: initialBook, bookNames, saving, onImport, onCl
   );
 }
 
+// ── Modal التعديل الجماعي لحقل واحد ─────────────────────────────────
+const BULK_EDIT_FIELDS = [
+  { id: "stage",     label: "المرحلة" },
+  { id: "region",    label: "المنطقة" },
+  { id: "job",       label: "الوظيفة" },
+  { id: "specialty", label: "التخصص" },
+  { id: "activity",  label: "نشاط الشركة" },
+];
+
+function BulkEditModal({ leads, regions, jobs, specialties, activities, saving, onApply, onClose }) {
+  const [field, setField] = useState("stage");
+  const [value, setValue] = useState("");
+
+  function handleField(f) { setField(f); setValue(""); }
+
+  const valueOptions =
+    field === "stage"     ? STAGES.map(s => ({ id: s.id, label: s.label })) :
+    field === "region"    ? regions.map(r => ({ id: r.name, label: r.name })) :
+    field === "job"       ? jobs.map(j => ({ id: j.name, label: j.name })) :
+    field === "specialty" ? specialties.map(s => ({ id: s.name, label: s.name })) :
+                             activities.map(a => ({ id: a.name, label: a.name }));
+
+  return (
+    <Modal title={`تعديل جماعي — ${leads.length} عميل`} onClose={onClose}>
+      <Field label="الحقل المطلوب تعديله">
+        <select style={S.inputBase} value={field} onChange={e => handleField(e.target.value)}>
+          {BULK_EDIT_FIELDS.map(f => <option key={f.id} value={f.id}>{f.label}</option>)}
+        </select>
+      </Field>
+      <Field label="القيمة الجديدة">
+        <select style={S.inputBase} value={value} onChange={e => setValue(e.target.value)}>
+          <option value="">اختر...</option>
+          {valueOptions.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+        </select>
+      </Field>
+      <div style={{ fontSize: 12, color: "#888", marginBottom: 14, background: "#FFF8E1", border: "1px solid #FDE68A", borderRadius: 8, padding: "8px 10px" }}>
+        ⚠️ سيتم استبدال قيمة هذا الحقل لكل العملاء المحددين ({leads.length}) بالقيمة المختارة.
+      </div>
+      <button style={{ ...S.btnPrimary, width: "100%" }} disabled={saving || !value} onClick={() => onApply(field, value)}>
+        {saving ? "جاري التطبيق..." : `تطبيق على ${leads.length} عميل`}
+      </button>
+    </Modal>
+  );
+}
+
 // ── Modal الإرسال الجماعي ────────────────────────────────────────────
 function BulkSendModal({ leads, messages, projects, onStageAdvance, onDone, onClose }) {
   const [selectedMsg, setSelectedMsg] = useState(null);
@@ -598,7 +788,7 @@ function BulkSendModal({ leads, messages, projects, onStageAdvance, onDone, onCl
 }
 
 // ── Lead Modal ─────────────────────────────────────────────────────
-function LeadModal({ lead, messages, projects, interests, regions, jobs, specialties, onQuickAddRegion, onQuickAddJob, onQuickAddSpecialty, onSave, onClose, loading, onManageInterests, onStageAdvance, bookNames, stockByBook, issuedCodes, onIssueCodes }) {
+function LeadModal({ lead, messages, projects, interests, regions, jobs, specialties, activities, onQuickAddRegion, onQuickAddJob, onQuickAddSpecialty, onQuickAddActivity, onSave, onClose, loading, onManageInterests, onStageAdvance, bookNames, stockByBook, issuedCodes, onIssueCodes }) {
   const isEdit = !!lead?.id;
 
   // تاريخ تنبيه تلقائي بعد أسبوع من اليوم للـ leads الجدد
@@ -615,6 +805,7 @@ function LeadModal({ lead, messages, projects, interests, regions, jobs, special
     name:      lead?.name      || "",
     job:       lead?.job       || "",
     specialty: lead?.specialty || "",
+    activity:  lead?.activity  || "",
     company:   lead?.company   || "",
     region:    lead?.region    || "",
     address:   lead?.address   || "",
@@ -670,7 +861,12 @@ function LeadModal({ lead, messages, projects, interests, regions, jobs, special
           <LookupSelect items={specialties} value={form.specialty} onChange={v => setForm(f => ({ ...f, specialty: v }))} onQuickAdd={onQuickAddSpecialty} placeholder="اختر التخصص" />
         </Field>
       )}
-      <Field label="اسم الشركة"><input style={S.inputBase} value={form.company} onChange={set("company")} placeholder="اختياري" /></Field>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <Field label="اسم الشركة"><input style={S.inputBase} value={form.company} onChange={set("company")} placeholder="اختياري" /></Field>
+        <Field label="نشاط الشركة">
+          <LookupSelect items={activities} value={form.activity} onChange={v => setForm(f => ({ ...f, activity: v }))} onQuickAdd={onQuickAddActivity} placeholder="اختر النشاط" />
+        </Field>
+      </div>
       <Field label="العنوان"><input style={S.inputBase} value={form.address} onChange={set("address")} placeholder="اختياري" /></Field>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
         <Field label="متابعة 1"><input style={S.inputBase} value={form.followup1} onChange={set("followup1")} placeholder="ملاحظة متابعة" /></Field>
@@ -903,7 +1099,7 @@ function KanbanView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHis
                       <span title="رقم مكرر" style={{ fontSize: 10, background: "#FEE2E2", color: "#DC2626", padding: "1px 5px", borderRadius: 6, fontWeight: 700 }}>مكرر</span>
                     )}
                   </div>
-                  {l.job && <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{l.job}{l.specialty ? ` — ${l.specialty}` : ""}</div>}
+                  {l.job && <div style={{ fontSize: 11, color: "#888", marginBottom: 4 }}>{l.job}{l.specialty ? ` — ${l.specialty}` : ""}{l.activity ? ` · ${l.activity}` : ""}</div>}
                   {(l.interests || []).length > 0 && (
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 5 }}>
                       {(l.interests || []).slice(0, 2).map(iid => { const it = interests.find(x => x.id === iid); return it ? <span key={iid} style={{ fontSize: 9, padding: "1px 6px", borderRadius: 8, background: "#EEEDFE", color: "#3C3489" }}>{it.name}</span> : null; })}
@@ -971,6 +1167,7 @@ function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHist
           <th style={th} onClick={() => onSort("name")}>الاسم الكامل<SortIcon k="name" /></th>
           <th style={{ ...th, cursor: "default" }}>الموبايل</th>
           <th style={{ ...th, cursor: "default" }}>الوظيفة</th>
+          <th style={{ ...th, cursor: "default" }}>النشاط</th>
           <th style={{ ...th, cursor: "default" }}>مجالات الاهتمام</th>
           <th style={th} onClick={() => onSort("stage")}>المرحلة<SortIcon k="stage" /></th>
           <th style={th} onClick={() => onSort("alert_date")}>تنبيه<SortIcon k="alert_date" /></th>
@@ -979,7 +1176,7 @@ function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHist
           <th style={{ ...th, cursor: "default" }}>إجراءات</th>
         </tr></thead>
         <tbody>
-          {sorted.length === 0 && <tr><td colSpan={10} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد نتائج</td></tr>}
+          {sorted.length === 0 && <tr><td colSpan={11} style={{ ...td, textAlign: "center", color: "#ccc", padding: "2.5rem" }}>لا توجد نتائج</td></tr>}
           {sorted.map(l => { const si = stageInfo(l.stage); return (
             <tr key={l.id} onMouseEnter={e => e.currentTarget.style.background = "#fafafa"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
               <td style={td}><input type="checkbox" checked={!!selectedIds?.has(l.id)} onChange={() => onToggleSelect?.(l.id)} style={{ cursor: "pointer" }} /></td>
@@ -993,6 +1190,7 @@ function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHist
                 </div>
               </td>
               <td style={{ ...td, color: "#666" }}>{l.job ? (l.specialty ? `${l.job} — ${l.specialty}` : l.job) : "—"}</td>
+              <td style={{ ...td, color: "#666" }}>{l.activity || "—"}</td>
               <td style={td}>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
                   {(l.interests || []).map(iid => { const it = interests.find(x => x.id === iid); return it ? <span key={iid} style={{ fontSize: 10, padding: "2px 7px", borderRadius: 8, background: "#EEEDFE", color: "#3C3489", fontWeight: 600 }}>{it.name}</span> : null; })}
@@ -1492,13 +1690,14 @@ export default function App() {
   const [regions, setRegions] = useState([]);
   const [jobs, setJobs] = useState([]);
   const [specialties, setSpecialties] = useState([]);
+  const [activities, setActivities] = useState([]);
   const [activationCodes, setActivationCodes] = useState([]);
   const [thresholds, setThresholds] = useState([]);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
-  const [tab, setTab] = useState("kanban");
+  const [tab, setTab] = useState("table");
   const [modal, setModal] = useState(null);
 
   const [q, setQ] = useState("");
@@ -1508,6 +1707,7 @@ export default function App() {
   const [regionFilters, setRegionFilters] = useState([]);
   const [jobFilters, setJobFilters] = useState([]);
   const [specialtyFilters, setSpecialtyFilters] = useState([]);
+  const [activityFilters, setActivityFilters] = useState([]);
   const [dateField, setDateField] = useState(""); // "created_at" | "alert_date"
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -1523,7 +1723,7 @@ export default function App() {
   useEffect(() => {
     async function fetchAll() {
       setLoading(true);
-      const [l, m, h, i, t, a, r, j, sp, ac, th] = await Promise.all([
+      const [l, m, h, i, t, a, r, j, sp, av, ac, th] = await Promise.all([
         supabase.from("leads").select("*").order("created_at", { ascending: false }),
         supabase.from("messages").select("*").order("sort_order", { ascending: true }),
         supabase.from("lead_history").select("*").order("created_at", { ascending: true }),
@@ -1533,13 +1733,14 @@ export default function App() {
         supabase.from("regions").select("*").order("name"),
         supabase.from("jobs").select("*").order("name"),
         supabase.from("specialties").select("*").order("name"),
+        supabase.from("activities").select("*").order("name"),
         supabase.from("activation_codes").select("*").order("id", { ascending: true }),
         supabase.from("stock_alert_thresholds").select("*"),
       ]);
       setLeads(l.data || []); setMessages(m.data || []); setHistory(h.data || []);
       setInterests(i.data || []); setTasks(t.data || []);
       setAssignees(a.data || []);
-      setRegions(r.data || []); setJobs(j.data || []); setSpecialties(sp.data || []);
+      setRegions(r.data || []); setJobs(j.data || []); setSpecialties(sp.data || []); setActivities(av.data || []);
       setActivationCodes(ac.data || []); setThresholds(th.data || []);
       setLoading(false);
     }
@@ -1561,7 +1762,7 @@ export default function App() {
     const tmrw = tomorrowStr();
     const eow = endOfWeekStr();
     return leads.filter(l => {
-      const text = `${l.nickname || ""} ${l.name || ""} ${l.phone || ""} ${l.job || ""} ${l.specialty || ""} ${l.email || ""}`;
+      const text = `${l.nickname || ""} ${l.name || ""} ${l.phone || ""} ${l.job || ""} ${l.specialty || ""} ${l.activity || ""} ${l.email || ""}`;
       if (q && !text.includes(q)) return false;
       if (stageFilters.length > 0) {
         if (!stageFilters.includes(l.stage)) return false;
@@ -1573,6 +1774,7 @@ export default function App() {
       if (regionFilters.length > 0 && !regionFilters.includes(l.region || "")) return false;
       if (jobFilters.length > 0 && !jobFilters.includes(l.job || "")) return false;
       if (specialtyFilters.length > 0 && !specialtyFilters.includes(l.specialty || "")) return false;
+      if (activityFilters.length > 0 && !activityFilters.includes(l.activity || "")) return false;
       if (showDupes && !dupPhones.has((l.phone || "").replace(/\s/g, ""))) return false;
       if (alertFilters.length > 0) {
         const matchAlert = alertFilters.some(f => {
@@ -1603,7 +1805,7 @@ export default function App() {
       }
       return true;
     });
-  }, [leads, q, stageFilters, interestFilters, alertFilters, regionFilters, jobFilters, specialtyFilters, showDupes, dupPhones, dateField, dateFrom, dateTo]);
+  }, [leads, q, stageFilters, interestFilters, alertFilters, regionFilters, jobFilters, specialtyFilters, activityFilters, showDupes, dupPhones, dateField, dateFrom, dateTo]);
 
   const saveLead = useCallback(async (form, selectedMsg) => {
     setSaving(true);
@@ -1611,7 +1813,8 @@ export default function App() {
     const payload = {
       nickname: form.nickname, phone: form.phone, name: form.name || null,
       email:     (form.email || "").trim() || null,
-      job: form.job || null, specialty: form.job === "طبيب" ? (form.specialty || null) : null, comment: form.comment || null,
+      job: form.job || null, specialty: form.job === "طبيب" ? (form.specialty || null) : null,
+      activity: form.activity || null, comment: form.comment || null,
       company:   form.company   || null,
       region:    form.region    || null,
       address:   form.address   || null,
@@ -1795,6 +1998,19 @@ export default function App() {
   }, []);
   const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
+  const bulkEditField = useCallback(async (field, value) => {
+    setSaving(true);
+    const ids = Array.from(selectedIds);
+    const patch = { [field]: value };
+    const { error } = await supabase.from("leads").update(patch).in("id", ids);
+    setSaving(false);
+    if (error) { showToast("حدث خطأ أثناء التعديل الجماعي", "error"); return; }
+    setLeads(prev => prev.map(l => ids.includes(l.id) ? { ...l, ...patch } : l));
+    showToast(`تم تعديل ${ids.length} عميل ✓`);
+    setSelectedIds(new Set());
+    setModal(null);
+  }, [selectedIds, showToast]);
+
   // ── مخزون أكواد التفعيل ────────────────────────────────────────────
   // قائمة أسماء الكتب: اتحاد مجالات الاهتمام + أي كتاب موجود فعلاً في المخزون
   const bookNames = useMemo(() => {
@@ -1865,14 +2081,16 @@ export default function App() {
   }, [activationCodes, showToast]);
 
   const TABS = [
-    { id: "kanban", label: "Kanban Board" },
-    { id: "table",  label: "جدول" },
-    { id: "msgs",   label: "مكتبة الرسائل" },
-    { id: "tasks",  label: "المهام" },
-    { id: "stock",  label: "مخزون الأكواد" },
+    { id: "table",    label: "جدول" },
+    { id: "kanban",   label: "Kanban Board" },
+    { id: "msgs",     label: "مكتبة الرسائل" },
+    { id: "tasks",    label: "المهام" },
+    { id: "stock",    label: "مخزون الأكواد" },
+    { id: "settings", label: "الإعدادات" },
   ];
   const leadHistory = modal?.data?.id ? history.filter(h => h.lead_id === modal.data.id) : [];
-  const hasFilters = q || stageFilters.length > 0 || interestFilters.length > 0 || alertFilters.length > 0 || regionFilters.length > 0 || jobFilters.length > 0 || specialtyFilters.length > 0 || showDupes || dateFrom || dateTo;
+  const hasFilters = q || stageFilters.length > 0 || interestFilters.length > 0 || alertFilters.length > 0 || regionFilters.length > 0 || jobFilters.length > 0 || specialtyFilters.length > 0 || activityFilters.length > 0 || showDupes || dateFrom || dateTo;
+  const activeFilterCount = [stageFilters, interestFilters, alertFilters, regionFilters, jobFilters, specialtyFilters, activityFilters].filter(a => a.length > 0).length + (showDupes ? 1 : 0) + (dateField && (dateFrom || dateTo) ? 1 : 0);
 
   return (
     <div dir="rtl" style={{ fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", background: "#f5f5f7", minHeight: "100vh", paddingBottom: "2rem" }}>
@@ -1882,9 +2100,11 @@ export default function App() {
           <span style={{ fontSize: 20, fontWeight: 800 }}>Sales CRM</span>
           <span style={{ fontSize: 12, color: "#aaa" }}>بواسطة HeroTec</span>
         </div>
-        <button style={S.btnPrimary} onClick={() => setModal({ type: tab === "tasks" ? "add-task" : "add-lead" })}>
-          {tab === "tasks" ? "+ مهمة جديدة" : "+ إضافة Lead"}
-        </button>
+        {tab !== "settings" && tab !== "stock" && (
+          <button style={S.btnPrimary} onClick={() => setModal({ type: tab === "tasks" ? "add-task" : "add-lead" })}>
+            {tab === "tasks" ? "+ مهمة جديدة" : "+ إضافة Lead"}
+          </button>
+        )}
       </div>
 
       <div style={{ padding: "0 24px" }}>
@@ -1902,79 +2122,28 @@ export default function App() {
               ))}
             </div>
 
-            {tab !== "msgs" && (
-              <div style={{ marginBottom: 16 }}>
-                {/* Row 1: search + stage + interests + alerts + dupes */}
-                <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <input style={{ ...S.inputBase, flex: 1, minWidth: 160, maxWidth: 260, height: 36 }} value={q} onChange={e => setQ(e.target.value)} placeholder="ابحث بالاسم أو الموبايل..." />
-                  <MultiSelectPicker
-                    label="كل المراحل"
-                    options={STAGES.map(s => ({ id: s.id, label: s.label, color: s.color, bg: s.bg, text: s.text }))}
-                    selected={stageFilters} onChange={setStageFilters}
-                  />
-                  <MultiSelectPicker
-                    label="كل المجالات"
-                    options={interests.map(i => ({ id: String(i.id), label: i.name, color: "#6B7FD4", bg: "#EEEDFE", text: "#3C3489" }))}
-                    selected={interestFilters} onChange={setInterestFilters}
-                    activeColor="#6B7FD4" activeBg="#EEEDFE" activeText="#3C3489"
-                  />
-                  <MultiSelectPicker
-                    label="كل التنبيهات"
-                    options={ALERT_OPTIONS}
-                    selected={alertFilters} onChange={setAlertFilters}
-                    activeColor="#D97706" activeBg="#FEF3C7" activeText="#92400E"
-                  />
-                  {/* Duplicate toggle */}
-                  <button onClick={() => setShowDupes(v => !v)}
-                    style={{ height: 36, padding: "0 12px", fontSize: 13, border: "1px solid #ddd", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, fontWeight: showDupes ? 700 : 400, background: showDupes ? "#FEE2E2" : "#fafafa", color: showDupes ? "#DC2626" : "#444" }}>
-                    🔁 {showDupes ? `أرقام مكررة (${dupPhones.size})` : "كشف المكرر"}
+            {(tab === "kanban" || tab === "table") && (
+              <div style={{ marginBottom: 16, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <input style={{ ...S.inputBase, flex: 1, minWidth: 160, maxWidth: 260, height: 36 }} value={q} onChange={e => setQ(e.target.value)} placeholder="ابحث بالاسم أو الموبايل..." />
+                <FiltersPanel
+                  stageFilters={stageFilters} setStageFilters={setStageFilters}
+                  interests={interests} interestFilters={interestFilters} setInterestFilters={setInterestFilters}
+                  alertFilters={alertFilters} setAlertFilters={setAlertFilters}
+                  regions={regions} regionFilters={regionFilters} setRegionFilters={setRegionFilters}
+                  jobs={jobs} jobFilters={jobFilters} setJobFilters={setJobFilters}
+                  specialties={specialties} specialtyFilters={specialtyFilters} setSpecialtyFilters={setSpecialtyFilters}
+                  activities={activities} activityFilters={activityFilters} setActivityFilters={setActivityFilters}
+                  showDupes={showDupes} setShowDupes={setShowDupes} dupCount={dupPhones.size}
+                  dateField={dateField} setDateField={setDateField} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo}
+                  activeCount={activeFilterCount}
+                  onClear={() => { setQ(""); setStageFilters([]); setInterestFilters([]); setAlertFilters([]); setRegionFilters([]); setJobFilters([]); setSpecialtyFilters([]); setActivityFilters([]); setShowDupes(false); setDateField(""); setDateFrom(""); setDateTo(""); }}
+                />
+                {hasFilters && (
+                  <button style={{ ...S.btnSecondary, height: 36, padding: "0 14px" }}
+                    onClick={() => { setQ(""); setStageFilters([]); setInterestFilters([]); setAlertFilters([]); setRegionFilters([]); setJobFilters([]); setSpecialtyFilters([]); setActivityFilters([]); setShowDupes(false); setDateField(""); setDateFrom(""); setDateTo(""); }}>
+                    مسح الفلاتر
                   </button>
-                  {hasFilters && (
-                    <button style={{ ...S.btnSecondary, height: 36, padding: "0 14px" }}
-                      onClick={() => { setQ(""); setStageFilters([]); setInterestFilters([]); setAlertFilters([]); setRegionFilters([]); setJobFilters([]); setSpecialtyFilters([]); setShowDupes(false); setDateField(""); setDateFrom(""); setDateTo(""); }}>
-                      مسح الفلاتر
-                    </button>
-                  )}
-                </div>
-                {/* Row 2: region + job + date range */}
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                  <MultiSelectPicker
-                    label="كل المناطق"
-                    options={regions.map(r => ({ id: r.name, label: r.name, color: "#0891B2", bg: "#E0F2FE", text: "#0C4A6E" }))}
-                    selected={regionFilters} onChange={setRegionFilters}
-                    activeColor="#0891B2" activeBg="#E0F2FE" activeText="#0C4A6E"
-                  />
-                  <MultiSelectPicker
-                    label="كل الوظائف"
-                    options={jobs.map(j => ({ id: j.name, label: j.name, color: "#8B5CF6", bg: "#F3E8FF", text: "#4C1D95" }))}
-                    selected={jobFilters} onChange={setJobFilters}
-                    activeColor="#8B5CF6" activeBg="#F3E8FF" activeText="#4C1D95"
-                  />
-                  {specialties.length > 0 && (
-                    <MultiSelectPicker
-                      label="كل التخصصات"
-                      options={specialties.map(s => ({ id: s.name, label: s.name, color: "#059669", bg: "#D1FAE5", text: "#065F46" }))}
-                      selected={specialtyFilters} onChange={setSpecialtyFilters}
-                      activeColor="#059669" activeBg="#D1FAE5" activeText="#065F46"
-                    />
-                  )}
-                  <button style={{ ...S.btnSecondary, height: 34, padding: "0 10px", fontSize: 12 }} onClick={() => setModal({ type: "manage-regions" })}>إدارة المناطق</button>
-                  <button style={{ ...S.btnSecondary, height: 34, padding: "0 10px", fontSize: 12 }} onClick={() => setModal({ type: "manage-jobs" })}>إدارة الوظائف</button>
-                  <button style={{ ...S.btnSecondary, height: 34, padding: "0 10px", fontSize: 12 }} onClick={() => setModal({ type: "manage-specialties" })}>إدارة التخصصات</button>
-                  <select style={{ ...S.inputBase, width: "auto", height: 34, fontSize: 12 }} value={dateField} onChange={e => { setDateField(e.target.value); setDateFrom(""); setDateTo(""); }}>
-                    <option value="">فلتر بالتاريخ</option>
-                    <option value="created_at">تاريخ الإضافة</option>
-                    <option value="updated_at">تاريخ آخر تعديل</option>
-                    <option value="alert_date">تاريخ التنبيه</option>
-                  </select>
-                  {dateField && (
-                    <>
-                      <input type="date" style={{ ...S.inputBase, width: "auto", height: 34, fontSize: 12 }} value={dateFrom} onChange={e => setDateFrom(e.target.value)} title="من تاريخ" />
-                      <span style={{ fontSize: 12, color: "#888" }}>←</span>
-                      <input type="date" style={{ ...S.inputBase, width: "auto", height: 34, fontSize: 12 }} value={dateTo} onChange={e => setDateTo(e.target.value)} title="إلى تاريخ" />
-                    </>
-                  )}
-                </div>
+                )}
               </div>
             )}
 
@@ -1982,25 +2151,37 @@ export default function App() {
               <div style={{ position: "sticky", top: 0, zIndex: 5, display: "flex", alignItems: "center", gap: 10, background: "#EEEDFE", border: "1px solid #c7c2f5", borderRadius: 10, padding: "8px 14px", marginBottom: 12 }}>
                 <span style={{ fontSize: 13, fontWeight: 700, color: "#3C3489" }}>تم تحديد {selectedIds.size} عميل</span>
                 <button style={{ ...S.btnPrimary, padding: "6px 14px", fontSize: 12 }} onClick={() => setModal({ type: "bulk-send" })}>📤 إرسال جماعي</button>
+                <button style={{ ...S.btnSecondary, padding: "6px 14px", fontSize: 12 }} onClick={() => setModal({ type: "bulk-edit" })}>✏️ تعديل جماعي</button>
                 <button style={{ ...S.btnSecondary, padding: "6px 14px", fontSize: 12 }} onClick={clearSelection}>إلغاء التحديد</button>
               </div>
             )}
 
-            {tab === "kanban" && <KanbanView leads={filteredLeads} interests={interests} dupPhones={dupPhones} stageFilters={stageFilters} selectedIds={selectedIds} onToggleSelect={toggleSelect} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
-            {tab === "table"  && <TableView  leads={filteredLeads} interests={interests} dupPhones={dupPhones} selectedIds={selectedIds} onToggleSelect={toggleSelect} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} sortConfig={sortConfig} onSort={handleSort} />}
-            {tab === "msgs"   && <MsgsView messages={messages} projects={interests} onAdd={() => setModal({ type: "add-msg" })} onEdit={m => setModal({ type: "edit-msg", data: m })} onDelete={deleteMsg} onManageProjects={() => setModal({ type: "manage-interests" })} onReorder={reorderMsgs} />}
-            {tab === "tasks"  && <TasksView tasks={tasks} projects={interests} assignees={assignees} onAdd={() => setModal({ type: "add-task" })} onEdit={t => setModal({ type: "edit-task", data: t })} onDelete={deleteTask} onManageAssignees={() => setModal({ type: "manage-assignees" })} />}
-            {tab === "stock"  && <StockView bookNames={bookNames} stockByBook={stockByBook} thresholdFor={thresholdFor} onSetThreshold={setThreshold} onImport={book => setModal({ type: "import-codes", data: { book } })} />}
+            {tab === "kanban"   && <KanbanView leads={filteredLeads} interests={interests} dupPhones={dupPhones} stageFilters={stageFilters} selectedIds={selectedIds} onToggleSelect={toggleSelect} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} />}
+            {tab === "table"    && <TableView  leads={filteredLeads} interests={interests} dupPhones={dupPhones} selectedIds={selectedIds} onToggleSelect={toggleSelect} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} sortConfig={sortConfig} onSort={handleSort} />}
+            {tab === "msgs"     && <MsgsView messages={messages} projects={interests} onAdd={() => setModal({ type: "add-msg" })} onEdit={m => setModal({ type: "edit-msg", data: m })} onDelete={deleteMsg} onManageProjects={() => setModal({ type: "manage-interests" })} onReorder={reorderMsgs} />}
+            {tab === "tasks"    && <TasksView tasks={tasks} projects={interests} assignees={assignees} onAdd={() => setModal({ type: "add-task" })} onEdit={t => setModal({ type: "edit-task", data: t })} onDelete={deleteTask} onManageAssignees={() => setModal({ type: "manage-assignees" })} />}
+            {tab === "stock"    && <StockView bookNames={bookNames} stockByBook={stockByBook} thresholdFor={thresholdFor} onSetThreshold={setThreshold} onImport={book => setModal({ type: "import-codes", data: { book } })} />}
+            {tab === "settings" && (
+              <SettingsView
+                regions={regions} jobs={jobs} specialties={specialties} activities={activities}
+                interests={interests} assignees={assignees} saving={saving}
+                onAddLookup={(table, name) => addLookup(table, name, { regions: setRegions, jobs: setJobs, specialties: setSpecialties, activities: setActivities, interests: setInterests }[table])}
+                onDeleteLookup={(table, id) => deleteLookup(table, id, { regions: setRegions, jobs: setJobs, specialties: setSpecialties, activities: setActivities, interests: setInterests }[table])}
+                onUpdateInterestColor={updateInterestColor}
+                onAddAssignee={addAssignee} onDeleteAssignee={deleteAssignee}
+              />
+            )}
           </>
         )}
       </div>
 
       {(modal?.type === "add-lead" || modal?.type === "edit-lead") && (
         <LeadModal lead={modal.data} messages={messages} projects={interests} interests={interests}
-          regions={regions} jobs={jobs} specialties={specialties}
+          regions={regions} jobs={jobs} specialties={specialties} activities={activities}
           onQuickAddRegion={name => addLookup("regions", name, setRegions)}
           onQuickAddJob={name => addLookup("jobs", name, setJobs)}
           onQuickAddSpecialty={name => addLookup("specialties", name, setSpecialties)}
+          onQuickAddActivity={name => addLookup("activities", name, setActivities)}
           onSave={saveLead} onClose={() => setModal(null)} loading={saving}
           onManageInterests={() => setModal({ type: "manage-interests" })}
           onStageAdvance={advanceStage}
@@ -2028,24 +2209,6 @@ export default function App() {
           onUpdateColor={updateInterestColor}
           onClose={() => setModal(null)} />
       )}
-      {modal?.type === "manage-regions" && (
-        <ManageListModal title="إدارة المناطق" items={regions} saving={saving}
-          onAdd={name => addLookup("regions", name, setRegions)}
-          onDelete={id => deleteLookup("regions", id, setRegions)}
-          onClose={() => setModal(null)} />
-      )}
-      {modal?.type === "manage-jobs" && (
-        <ManageListModal title="إدارة الوظائف" items={jobs} saving={saving}
-          onAdd={name => addLookup("jobs", name, setJobs)}
-          onDelete={id => deleteLookup("jobs", id, setJobs)}
-          onClose={() => setModal(null)} />
-      )}
-      {modal?.type === "manage-specialties" && (
-        <ManageListModal title="إدارة التخصصات" items={specialties} saving={saving}
-          onAdd={name => addLookup("specialties", name, setSpecialties)}
-          onDelete={id => deleteLookup("specialties", id, setSpecialties)}
-          onClose={() => setModal(null)} />
-      )}
       {modal?.type === "bulk-send" && (
         <BulkSendModal
           leads={leads.filter(l => selectedIds.has(l.id))}
@@ -2053,6 +2216,12 @@ export default function App() {
           onStageAdvance={advanceStage}
           onDone={id => setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; })}
           onClose={() => setModal(null)} />
+      )}
+      {modal?.type === "bulk-edit" && (
+        <BulkEditModal
+          leads={leads.filter(l => selectedIds.has(l.id))}
+          regions={regions} jobs={jobs} specialties={specialties} activities={activities}
+          saving={saving} onApply={bulkEditField} onClose={() => setModal(null)} />
       )}
       {modal?.type === "import-codes" && (
         <ImportCodesModal book={modal.data.book} bookNames={bookNames} saving={saving}
