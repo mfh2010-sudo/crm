@@ -119,8 +119,8 @@ function Toast({ msg, type }) {
 
 function Modal({ title, onClose, children }) {
   return (
-    <div onClick={e => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem" }}>
-      <div style={{ background: "#fff", borderRadius: 14, padding: "1.5rem", width: "100%", maxWidth: 500, maxHeight: "92vh", overflowY: "auto", direction: "rtl" }}>
+    <div onClick={e => e.target === e.currentTarget && onClose()} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: "1rem", boxSizing: "border-box", overflow: "hidden" }}>
+      <div style={{ background: "#fff", borderRadius: 14, padding: "1.5rem", width: "100%", maxWidth: 500, maxHeight: "92vh", overflowY: "auto", overflowX: "hidden", boxSizing: "border-box", direction: "rtl" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
           <h3 style={{ fontSize: 16, fontWeight: 700, color: "#1a1a1a" }}>{title}</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#aaa" }}>×</button>
@@ -1675,7 +1675,7 @@ function StatsBar({ leads, messages, allLeads }) {
     { label: "متأخرة",          val: leads.filter(l => l.alert_date && l.alert_date < today).length, color: "#DC2626" },
   ];
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 12, marginBottom: 20 }}>
       {stats.map(s => (
         <div key={s.label} style={{ ...S.card, padding: "12px 16px" }}>
           <div style={{ fontSize: 12, color: "#888", marginBottom: 4 }}>{s.label}</div>
@@ -2106,7 +2106,7 @@ export default function App() {
   const activeFilterCount = [stageFilters, interestFilters, alertFilters, regionFilters, jobFilters, specialtyFilters, activityFilters].filter(a => a.length > 0).length + (showDupes ? 1 : 0) + (dateField && (dateFrom || dateTo) ? 1 : 0);
 
   return (
-    <div dir="rtl" style={{ fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", background: "#f5f5f7", minHeight: "100vh", paddingBottom: "2rem" }}>
+    <div dir="rtl" style={{ fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", background: "#f5f5f7", minHeight: "100vh", paddingBottom: "2rem", overflowX: "hidden", maxWidth: "100vw" }}>
       {toast && <Toast msg={toast.msg} type={toast.type} />}
       <div style={{ background: "#fff", borderBottom: "1px solid #eee", padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
@@ -2126,7 +2126,7 @@ export default function App() {
             {/* Stats now use filteredLeads */}
             <StatsBar leads={filteredLeads} messages={messages} allLeads={leads} />
 
-            <div style={{ display: "flex", gap: 6, marginBottom: 16, background: "#efefef", borderRadius: 10, padding: 4, width: "fit-content" }}>
+            <div style={{ display: "flex", gap: 6, marginBottom: 16, background: "#efefef", borderRadius: 10, padding: 4, width: "fit-content", maxWidth: "100%", overflowX: "auto" }}>
               {TABS.map(t => (
                 <button key={t.id} onClick={() => setTab(t.id)}
                   style={{ padding: "7px 18px", fontSize: 13, fontWeight: tab === t.id ? 700 : 500, borderRadius: 8, border: "none", cursor: "pointer", background: tab === t.id ? "#fff" : "transparent", color: tab === t.id ? "#1a1a1a" : "#666", boxShadow: tab === t.id ? "0 1px 4px rgba(0,0,0,.08)" : "none" }}>
