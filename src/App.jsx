@@ -59,6 +59,63 @@ function callPhone(phone) {
   window.location.href = "tel:+" + d;
 }
 
+// تصدير تنبيه كملف تقويم (.ics) بتذكير على الموبايل — يرن حتى لو الموقع مقفول
+function icsEscape(t) { return (t || "").replace(/\\/g, "\\\\").replace(/\r?\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;"); }
+function downloadICS({ title, date, time, note }) {
+  if (!date || !time) return;
+  const [y, m, d] = date.split("-").map(Number);
+  const [hh, mm] = time.split(":").map(Number);
+  const pad = n => String(n).padStart(2, "0");
+  const fmt = dt => `${dt.getFullYear()}${pad(dt.getMonth() + 1)}${pad(dt.getDate())}T${pad(dt.getHours())}${pad(dt.getMinutes())}00`;
+  const start = new Date(y, m - 1, d, hh, mm);
+  const end = new Date(y, m - 1, d, hh, mm + 30);
+  const alarm = (trigger) => ["BEGIN:VALARM", `TRIGGER:${trigger}`, "ACTION:DISPLAY", `DESCRIPTION:${icsEscape(title)}`, "END:VALARM"];
+  const lines = [
+    "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//HeroTec CRM//AR", "CALSCALE:GREGORIAN",
+    "BEGIN:VEVENT",
+    `UID:${Date.now()}${Math.random().toString(36).slice(2, 8)}@herotec-crm`,
+    `DTSTAMP:${fmt(new Date())}`,
+    `DTSTART:${fmt(start)}`, `DTEND:${fmt(end)}`,
+    `SUMMARY:${icsEscape(title)}`,
+    ...(note ? [`DESCRIPTION:${icsEscape(note)}`] : []),
+    ...alarm("PT0M"), ...alarm("-PT10M"),
+    "END:VEVENT", "END:VCALENDAR",
+  ];
+  const blob = new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "reminder.ics";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// منبّه صوتي (WebAudio) — يعمل والموقع مفتوح بعد تفعيله بضغطة
+let _audioCtx = null;
+function unlockAudio() {
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    if (!_audioCtx) _audioCtx = new AC();
+    if (_audioCtx.state === "suspended") _audioCtx.resume();
+    return true;
+  } catch { return false; }
+}
+function playAlarm() {
+  if (!unlockAudio() || !_audioCtx) return;
+  const ctx = _audioCtx;
+  for (let i = 0; i < 6; i++) {
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.type = "sine"; osc.frequency.value = i % 2 ? 880 : 660;
+    const t0 = ctx.currentTime + i * 0.35;
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.4, t0 + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.3);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(t0); osc.stop(t0 + 0.32);
+  }
+  try { navigator.vibrate?.([300, 150, 300]); } catch {}
+}
+
 function openWhatsAppRaw(phone, text) {
   const clean = (phone || "").replace(/[^\d+]/g, "");
   const num = clean.startsWith("0") ? "2" + clean.substring(1) : clean;
@@ -236,7 +293,7 @@ function SettingsView({ regions, jobs, specialties, activities, interests, assig
   );
 }
 
-function AlertBadge({ date, note, done }) {
+function AlertBadge({ date, note, done, time }) {
   const info = alertLabel(date);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -264,7 +321,7 @@ function AlertBadge({ date, note, done }) {
           cursor: hasNote ? "pointer" : "default", display: "inline-flex", alignItems: "center", gap: 3,
           textDecoration: done ? "line-through" : "none", opacity: done ? 0.7 : 1,
         }}>
-        {done ? "✅" : "🔔"} {info.text}
+        {done ? "✅" : "🔔"} {info.text}{time ? ` · ${time}` : ""}
         {hasNote && !done && <span style={{ width: 4, height: 4, borderRadius: "50%", background: color, display: "inline-block" }} />}
       </span>
       {open && hasNote && (
@@ -827,6 +884,7 @@ function LeadModal({ lead, messages, projects, interests, regions, jobs, special
     stage:     lead?.stage     || "lead",
     comment:   lead?.comment   || "",
     alert_date: defaultAlertDate,
+    alert_time: lead?.alert_time || "",
     alert_note: lead?.alert_note || "",
     alert_done: lead?.alert_done || false,
     interests:  lead?.interests  || [],
@@ -897,13 +955,16 @@ function LeadModal({ lead, messages, projects, interests, regions, jobs, special
       )}
       <Field label="تعليق"><textarea style={{ ...S.inputBase, height: 60, resize: "vertical" }} value={form.comment} onChange={set("comment")} placeholder="اختياري" /></Field>
       <Field label="تاريخ التنبيه / المتابعة">
-        <input type="date" style={S.inputBase} value={form.alert_date} onChange={set("alert_date")} min={todayStr()} />
+        <div style={{ display: "flex", gap: 8 }}>
+          <input type="date" style={{ ...S.inputBase, flex: 1, minWidth: 0 }} value={form.alert_date} onChange={set("alert_date")} min={todayStr()} />
+          <input type="time" style={{ ...S.inputBase, width: 110, flexShrink: 0 }} value={form.alert_time} onChange={set("alert_time")} title="وقت التنبيه (اختياري)" />
+        </div>
         {form.alert_date && (
           <>
             <input style={{ ...S.inputBase, marginTop: 8 }} value={form.alert_note} onChange={set("alert_note")}
               placeholder="ملاحظة قصيرة تظهر عند تمرير الماوس أو الضغط على التاريخ (اختياري)" />
             <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 10 }}>
-              <AlertBadge date={form.alert_date} note={form.alert_note} done={form.alert_done} />
+              <AlertBadge date={form.alert_date} time={form.alert_time} note={form.alert_note} done={form.alert_done} />
               <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#555" }}>
                 <input type="checkbox" checked={!!form.alert_done}
                   onChange={e => setForm(f => ({ ...f, alert_done: e.target.checked }))}
@@ -911,6 +972,12 @@ function LeadModal({ lead, messages, projects, interests, regions, jobs, special
                 تم التنبيه
               </label>
             </div>
+            {form.alert_time && (
+              <button type="button" style={{ ...S.btnSecondary, marginTop: 8, fontSize: 12 }}
+                onClick={() => downloadICS({ title: `متابعة: ${form.nickname || form.name || ""}`, date: form.alert_date, time: form.alert_time, note: [form.alert_note, form.phone && `موبايل: ${form.phone}`].filter(Boolean).join("\n") })}>
+                📅 أضف لتقويم الموبايل (تذكير بصوت)
+              </button>
+            )}
           </>
         )}
       </Field>
@@ -1126,7 +1193,7 @@ function KanbanView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHis
                     <button style={{ ...S.btnSecondary, padding: "3px 7px", fontSize: 11, color: "#c00" }} onClick={e => { e.stopPropagation(); if (confirm("حذف؟")) onDelete(l.id); }}>🗑</button>
                   </div>
                   {l.comment && <div style={{ fontSize: 10, color: "#999", marginTop: 5, paddingTop: 4, borderTop: "1px solid #f0f0f0", fontStyle: "italic" }}>{l.comment.substring(0, 50)}{l.comment.length > 50 ? "…" : ""}</div>}
-                  {l.alert_date && <div style={{ marginTop: 4 }}><AlertBadge date={l.alert_date} note={l.alert_note} done={l.alert_done} /></div>}
+                  {l.alert_date && <div style={{ marginTop: 4 }}><AlertBadge date={l.alert_date} time={l.alert_time} note={l.alert_note} done={l.alert_done} /></div>}
                 </div>
               ))}
             </div>
@@ -1211,7 +1278,7 @@ function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHist
                 </div>
               </td>
               <td style={td}><span style={{ fontSize: 11, padding: "3px 9px", borderRadius: 12, fontWeight: 700, background: si.bg, color: si.text }}>{si.label}</span></td>
-              <td style={td}><AlertBadge date={l.alert_date} note={l.alert_note} done={l.alert_done} /></td>
+              <td style={td}><AlertBadge date={l.alert_date} time={l.alert_time} note={l.alert_note} done={l.alert_done} /></td>
               <td style={{ ...td, fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>
                 {l.created_at ? new Date(l.created_at).toLocaleDateString("ar-EG", { day: "numeric", month: "short", year: "numeric" }) : "—"}
               </td>
@@ -1272,6 +1339,7 @@ function TaskModal({ task, projects, assignees, onSave, onClose, loading }) {
     priority:    task?.priority    || "Medium",
     alert_note:  task?.alert_note  || "",
     alert_date:  task?.alert_date  || "",
+    alert_time:  task?.alert_time  || "",
     alert_done:  task?.alert_done  || false,
   });
   const set = k => e => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -1319,12 +1387,15 @@ function TaskModal({ task, projects, assignees, onSave, onClose, loading }) {
         <textarea style={{ ...S.inputBase, height: 70, resize: "vertical" }} value={form.report} onChange={set("report")} placeholder="تقرير أو ملاحظات المنفذ..." />
       </Field>
       <Field label="تاريخ التنبيه">
-        <input type="date" style={S.inputBase} value={form.alert_date} onChange={set("alert_date")} />
+        <div style={{ display: "flex", gap: 8 }}>
+          <input type="date" style={{ ...S.inputBase, flex: 1, minWidth: 0 }} value={form.alert_date} onChange={set("alert_date")} />
+          <input type="time" style={{ ...S.inputBase, width: 110, flexShrink: 0 }} value={form.alert_time} onChange={set("alert_time")} title="وقت التنبيه (اختياري)" />
+        </div>
         {form.alert_date && (
           <>
             <input style={{ ...S.inputBase, marginTop: 8 }} value={form.alert_note} onChange={set("alert_note")} placeholder="ملاحظة تظهر عند الاقتراب (اختياري)" />
             <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 10 }}>
-              <AlertBadge date={form.alert_date} note={form.alert_note} done={form.alert_done} />
+              <AlertBadge date={form.alert_date} time={form.alert_time} note={form.alert_note} done={form.alert_done} />
               <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#555" }}>
                 <input type="checkbox" checked={!!form.alert_done}
                   onChange={e => setForm(f => ({ ...f, alert_done: e.target.checked }))}
@@ -1332,6 +1403,12 @@ function TaskModal({ task, projects, assignees, onSave, onClose, loading }) {
                 تم التنبيه
               </label>
             </div>
+            {form.alert_time && (
+              <button type="button" style={{ ...S.btnSecondary, marginTop: 8, fontSize: 12 }}
+                onClick={() => downloadICS({ title: `مهمة: ${form.title || ""}`, date: form.alert_date, time: form.alert_time, note: form.alert_note })}>
+                📅 أضف لتقويم الموبايل (تذكير بصوت)
+              </button>
+            )}
           </>
         )}
       </Field>
@@ -1533,7 +1610,7 @@ function TasksView({ tasks, projects, assignees, onAdd, onEdit, onDelete, onMana
                       ? new Date(t.updated_at).toLocaleDateString("ar-EG", { day: "numeric", month: "short", year: "numeric" })
                       : "—"}
                   </td>
-                  <td style={td}><AlertBadge date={t.alert_date} note={t.alert_note} done={t.alert_done} /></td>
+                  <td style={td}><AlertBadge date={t.alert_date} time={t.alert_time} note={t.alert_note} done={t.alert_done} /></td>
                   <td style={td}>
                     <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                       <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => onEdit(t)}>تعديل</button>
@@ -1760,6 +1837,47 @@ export default function App() {
     fetchAll();
   }, []);
 
+  // ── منبّه صوتي أثناء فتح الموقع ──────────────────────────────────
+  const [alarmOn, setAlarmOn] = useState(() => { try { return localStorage.getItem("crm_alarm") === "1"; } catch { return false; } });
+  const [ringing, setRinging] = useState([]);
+  const firedRef = useRef(new Set());
+  const dataRef = useRef({ leads: [], tasks: [] });
+  dataRef.current = { leads, tasks };
+  function toggleAlarm() {
+    const next = !alarmOn;
+    if (next) { unlockAudio(); playAlarm(); }
+    setAlarmOn(next);
+    try { localStorage.setItem("crm_alarm", next ? "1" : "0"); } catch {}
+  }
+  useEffect(() => {
+    if (!alarmOn) return;
+    const unlock = () => unlockAudio();
+    window.addEventListener("pointerdown", unlock, { once: true });
+    function check() {
+      const now = new Date();
+      const pad = n => String(n).padStart(2, "0");
+      const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+      const found = [];
+      const scan = (arr, kind) => arr.forEach(x => {
+        if (!x.alert_date || x.alert_date !== today || !x.alert_time || x.alert_done) return;
+        const [h, m] = x.alert_time.split(":").map(Number);
+        const diff = nowMin - (h * 60 + m);
+        const key = `${kind}-${x.id}-${x.alert_date}-${x.alert_time}`;
+        if (diff >= 0 && diff <= 10 && !firedRef.current.has(key)) {
+          firedRef.current.add(key);
+          found.push({ key, time: x.alert_time, title: kind === "lead" ? `متابعة: ${x.nickname || x.name || x.phone}` : `مهمة: ${x.title}`, note: x.alert_note });
+        }
+      });
+      scan(dataRef.current.leads, "lead");
+      scan(dataRef.current.tasks, "task");
+      if (found.length) { setRinging(prev => [...prev, ...found]); playAlarm(); }
+    }
+    check();
+    const id = setInterval(check, 20000);
+    return () => { clearInterval(id); window.removeEventListener("pointerdown", unlock); };
+  }, [alarmOn]);
+
   // حساب الأرقام المكررة
   const dupPhones = useMemo(() => {
     const counts = {};
@@ -1833,7 +1951,7 @@ export default function App() {
       address:   form.address   || null,
       followup1: form.followup1 || null,
       followup2: form.followup2 || null,
-      alert_date: form.alert_date || null, alert_note: form.alert_note || null,
+      alert_date: form.alert_date || null, alert_time: form.alert_date ? (form.alert_time || null) : null, alert_note: form.alert_note || null,
       alert_done: !!form.alert_done, interests: form.interests,
     };
     if (editing?.id) {
@@ -1945,6 +2063,7 @@ export default function App() {
       priority:    form.priority    || "Medium",
       alert_note:  form.alert_note  || null,
       alert_date:  form.alert_date  || null,
+      alert_time:  form.alert_date ? (form.alert_time || null) : null,
       alert_done:  !!form.alert_done,
     };
     if (editing?.id) {
@@ -2108,10 +2227,28 @@ export default function App() {
   return (
     <div dir="rtl" style={{ fontFamily: "'Segoe UI', Tahoma, Arial, sans-serif", background: "#f5f5f7", minHeight: "100vh", paddingBottom: "2rem", overflowX: "hidden", maxWidth: "100vw" }}>
       {toast && <Toast msg={toast.msg} type={toast.type} />}
+      {ringing.length > 0 && (
+        <div style={{ position: "fixed", top: 10, left: 10, right: 10, zIndex: 300, display: "flex", flexDirection: "column", gap: 8 }}>
+          {ringing.map(r => (
+            <div key={r.key} style={{ background: "#FEF3C7", border: "1.5px solid #D97706", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10, boxShadow: "0 6px 20px rgba(0,0,0,.2)" }}>
+              <span style={{ fontSize: 22 }}>⏰</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "#92400E" }}>{r.title} — {r.time}</div>
+                {r.note && <div style={{ fontSize: 12, color: "#78350F", marginTop: 2 }}>{r.note}</div>}
+              </div>
+              <button style={S.btnPrimary} onClick={() => setRinging(prev => prev.filter(x => x.key !== r.key))}>تمام</button>
+            </div>
+          ))}
+        </div>
+      )}
       <div style={{ background: "#fff", borderBottom: "1px solid #eee", padding: "14px 24px", display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
           <span style={{ fontSize: 20, fontWeight: 800 }}>Sales CRM</span>
           <span style={{ fontSize: 12, color: "#aaa" }}>بواسطة HeroTec</span>
+          <button onClick={toggleAlarm} title="المنبّه الصوتي يعمل والموقع مفتوح فقط"
+            style={{ ...S.btnSecondary, padding: "3px 10px", fontSize: 12, marginInlineStart: 6, background: alarmOn ? "#EAF3DE" : "#fafafa", color: alarmOn ? "#173404" : "#666" }}>
+            {alarmOn ? "🔔 المنبّه مفعّل" : "🔕 المنبّه مغلق"}
+          </button>
         </div>
         {tab !== "settings" && tab !== "stock" && (
           <button style={S.btnPrimary} onClick={() => setModal({ type: tab === "tasks" ? "add-task" : "add-lead" })}>
