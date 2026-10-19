@@ -48,6 +48,17 @@ function buildMessage(body, lead) {
   return `${greeting}\n\n${cleaned}`;
 }
 
+// اتصال هاتفي: نحوّل أي صيغة مخزّنة لصيغة دولية صريحة (+20...) عشان الموبايل يتصل من أول مرة
+function callPhone(phone) {
+  let d = (phone || "").replace(/[^\d+]/g, "");
+  if (d.startsWith("+")) d = d.slice(1);
+  else if (d.startsWith("00")) d = d.slice(2);
+  else if (d.startsWith("0")) d = "20" + d.slice(1);            // 010xxxxxxxx → 2010xxxxxxxx
+  else if (d.length === 10 && d.startsWith("1")) d = "20" + d;  // 10xxxxxxxx  → 2010xxxxxxxx
+  if (!d) return;
+  window.location.href = "tel:+" + d;
+}
+
 function openWhatsAppRaw(phone, text) {
   const clean = (phone || "").replace(/[^\d+]/g, "");
   const num = clean.startsWith("0") ? "2" + clean.substring(1) : clean;
@@ -1110,7 +1121,7 @@ function KanbanView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHis
                   )}
                   <div style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
                     <button style={{ ...S.btnWA, padding: "3px 8px", fontSize: 11 }} onClick={e => { e.stopPropagation(); onWA(l); }}>WA</button>
-                    <button style={{ ...S.btnSecondary, padding: "3px 7px", fontSize: 11 }} onClick={e => { e.stopPropagation(); window.open("tel:" + l.phone); }}>📞</button>
+                    <button style={{ ...S.btnSecondary, padding: "3px 7px", fontSize: 11 }} onClick={e => { e.stopPropagation(); callPhone(l.phone); }}>📞</button>
                     <button style={{ ...S.btnSecondary, padding: "3px 7px", fontSize: 11 }} onClick={e => { e.stopPropagation(); onHistory(l); }}>📋</button>
                     <button style={{ ...S.btnSecondary, padding: "3px 7px", fontSize: 11, color: "#c00" }} onClick={e => { e.stopPropagation(); if (confirm("حذف؟")) onDelete(l.id); }}>🗑</button>
                   </div>
@@ -1213,7 +1224,7 @@ function TableView({ leads, interests, dupPhones, onEdit, onDelete, onWA, onHist
                 <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
                   <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => onEdit(l)}>تعديل</button>
                   <button style={{ ...S.btnWA, padding: "4px 9px", fontSize: 12 }} onClick={() => onWA(l)}>WA</button>
-                  <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => window.open("tel:" + l.phone)}>📞</button>
+                  <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => callPhone(l.phone)}>📞</button>
                   <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12 }} onClick={() => onHistory(l)}>📋</button>
                   <button style={{ ...S.btnSecondary, padding: "4px 9px", fontSize: 12, color: "#c00" }} onClick={() => { if (confirm("حذف؟")) onDelete(l.id); }}>🗑</button>
                 </div>
