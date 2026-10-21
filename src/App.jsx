@@ -632,7 +632,7 @@ function ActivationCodesSection({ lead, interests, leadInterestIds, bookNames, s
 }
 
 // ── شاشة مخزون الأكواد ───────────────────────────────────────────────
-function StockView({ bookNames, stockByBook, thresholdFor, onSetThreshold, onImport }) {
+function StockView({ bookNames, stockByBook, thresholdFor, onSetThreshold, onImport, onClearAvailable }) {
   if (bookNames.length === 0) {
     return <div style={{ textAlign: "center", color: "#aaa", padding: "3rem" }}>لا توجد كتب بعد — استورد أول ملف أكواد لتبدأ</div>;
   }
@@ -661,6 +661,9 @@ function StockView({ bookNames, stockByBook, thresholdFor, onSetThreshold, onImp
               <input type="number" min={0} defaultValue={th} style={{ ...S.inputBase, width: 56, textAlign: "center" }}
                 onBlur={e => onSetThreshold(b, e.target.value)} />
               <button style={{ ...S.btnSecondary, padding: "6px 12px", fontSize: 12 }} onClick={() => onImport(b)}>استيراد أكواد</button>
+              <button style={{ ...S.btnSecondary, padding: "6px 12px", fontSize: 12, color: s.available > 0 ? "#c00" : "#bbb" }}
+                disabled={s.available === 0} title="يحذف الأكواد المتاحة فقط — المُسلَّمة للعملاء لا تتأثر"
+                onClick={() => onClearAvailable(b, s.available)}>🗑 حذف المتاح</button>
             </div>
           </div>
         );
@@ -2184,6 +2187,16 @@ export default function App() {
     showToast(`تم استيراد ${added} كود جديد ✓${added < clean.length ? ` (${clean.length - added} موجود مسبقاً)` : ""}`);
   }, [showToast]);
 
+  const clearAvailableCodes = useCallback(async (book, count) => {
+    if (!confirm(`حذف ${count} كود متاح من "${book}"؟\nالأكواد المُسلَّمة للعملاء لن تتأثر. لا يمكن التراجع.`)) return;
+    setSaving(true);
+    const { error } = await supabase.from("activation_codes").delete().eq("book", book).eq("status", "available");
+    setSaving(false);
+    if (error) { showToast("خطأ في الحذف", "error"); return; }
+    setActivationCodes(prev => prev.filter(c => !(c.book === book && c.status === "available")));
+    showToast(`تم حذف ${count} كود من "${book}"`);
+  }, [showToast]);
+
   const setThreshold = useCallback(async (book, value) => {
     const n = Math.max(0, Number(value) || 0);
     const { data } = await supabase.from("stock_alert_thresholds")
@@ -2310,7 +2323,7 @@ export default function App() {
             {tab === "table"    && <TableView  leads={filteredLeads} interests={interests} dupPhones={dupPhones} selectedIds={selectedIds} onToggleSelect={toggleSelect} onEdit={l => setModal({ type: "edit-lead", data: l })} onDelete={deleteLead} onWA={l => setModal({ type: "send-wa", data: l })} onHistory={l => setModal({ type: "history", data: l })} sortConfig={sortConfig} onSort={handleSort} />}
             {tab === "msgs"     && <MsgsView messages={messages} projects={interests} onAdd={() => setModal({ type: "add-msg" })} onEdit={m => setModal({ type: "edit-msg", data: m })} onDelete={deleteMsg} onManageProjects={() => setModal({ type: "manage-interests" })} onReorder={reorderMsgs} />}
             {tab === "tasks"    && <TasksView tasks={tasks} projects={interests} assignees={assignees} onAdd={() => setModal({ type: "add-task" })} onEdit={t => setModal({ type: "edit-task", data: t })} onDelete={deleteTask} onManageAssignees={() => setModal({ type: "manage-assignees" })} />}
-            {tab === "stock"    && <StockView bookNames={bookNames} stockByBook={stockByBook} thresholdFor={thresholdFor} onSetThreshold={setThreshold} onImport={book => setModal({ type: "import-codes", data: { book } })} />}
+            {tab === "stock"    && <StockView bookNames={bookNames} stockByBook={stockByBook} thresholdFor={thresholdFor} onSetThreshold={setThreshold} onImport={book => setModal({ type: "import-codes", data: { book } })} onClearAvailable={clearAvailableCodes} />}
             {tab === "settings" && (
               <SettingsView
                 regions={regions} jobs={jobs} specialties={specialties} activities={activities}
